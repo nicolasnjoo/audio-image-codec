@@ -46,7 +46,7 @@ def spectrogram_db(x):
     f, t, Z = stft(x, FS, nperseg=512, noverlap=384)
     return f, t, np.abs(Z)
 
-def degradation_figure(path, pk, x, decoded):
+def degradation_figure(path, pk, x, decoded, title=None):
     """decoded: list of (label, signal, snr dB). Original + 5 conditions, magma, 0-8 kHz."""
     f, t, S0 = spectrogram_db(x); ref = S0.max()
     panels = [("original (prepared: 16 kHz mono)", x, None)] + decoded
@@ -67,7 +67,7 @@ def degradation_figure(path, pk, x, decoded):
     cb = fig.colorbar(img, ax=axes, shrink=0.85, pad=0.01)
     cb.set_label("magnitude (dB re. loudest bin of the original)", fontsize=10)
     cb.outline.set_visible(False)
-    fig.suptitle(f"Piece {pk}: spectrogram after each channel condition ({DEFAULT_LOOK} look, 60/75)",
+    fig.suptitle(title or f"Piece {pk}: spectrogram after each channel condition ({DEFAULT_LOOK} look, 60/75)",
                  fontsize=13, x=0.01, ha="left")
     fig.savefig(path, dpi=110); plt.close(fig)
 

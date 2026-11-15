@@ -18,7 +18,7 @@ simulated as a sub-pixel shift. The default look is **Droplets**.
 ```
 a2i/        mdct.py  codec.py  shapes.py  channel.py  looks.py  features.py  testsignals.py
 scripts/    check_baseline.py  levers.py  colour_test.py  render_options.py
-            loss_budget.py  figures.py
+            loss_budget.py  figures.py  real_music.py
             explore_aesthetics.py  explore_shapes.py   (experimental, not the format)
 tests/      test_mdct.py  test_roundtrip.py  test_determinism.py  test_colorize.py
             test_explore.py  test_shapes.py
@@ -87,7 +87,7 @@ machine (tested), but a bit-exact cross-platform format needs an integer definit
 Measured on 2026-11-15 with Python 3.13.18, numpy 2.5.4, scipy 1.18.1, Pillow 13.0.0
 (libjpeg-turbo). Audio SNR in dB on three synthetic test pieces (A, B, C), Droplets look,
 60/75, decoded from the header-sized side information. The channel is simulated
-(`a2i/channel.py`); no real music and no real phone screenshot has been measured yet.
+(`a2i/channel.py`); no real phone screenshot has been measured yet. Real music is below.
 
 | Condition | A | B | C | Mean | Record, mean |
 |---|---|---|---|---|---|
@@ -107,7 +107,47 @@ primary is ~127): 47 with Droplets, 34 with Record.
 The MDCT stage alone reconstructs to > 270 dB except for the final 64 samples (4 ms),
 which are not reconstructed because the last half-window frame is not carried.
 
+## Real music
+
+`scripts/real_music.py NAME=file.wav ... --at 0,60,120` runs any PCM WAV through the same
+pipeline (decode MP3 first, for example with ffmpeg). Measured on nine 16.128 s excerpts:
+three commercial pop/rock songs (MP3 320 kbit/s, 44.1 kHz stereo), starting at 0, 60 and
+120 s. Droplets look. SNR is against the prepared signal (mono, 16 kHz), so the deliberate
+loss of stereo and of everything above 8 kHz is not counted. No audio is stored in this
+repository; `out/` is git-ignored.
+
+| Condition | Mean of 9 | Minimum | Synthetic mean |
+|---|---|---|---|
+| Lossless PNG | 38.7 | 33.6 | 35.7 |
+| JPEG q85 file | 23.6 | 22.9 | 24.3 |
+| Screenshot, perfect alignment | 19.0 | 18.4 | 19.6 |
+| Screenshot, 0.15 px alignment error | 16.9 | 16.4 | 17.4 |
+| Screenshot, 0.35 px alignment error | 11.4 | 11.1 | 11.6 |
+| q60 screenshot, 0.5 px (worst case) | 7.3 | 7.1 | 7.4 |
+
+Segmental SNR is lower on sparse passages: 15.3 dB after the screenshot and 6.3 dB in the
+worst case for the quietest excerpt.
+
+What real music changed, relative to the synthetic pieces (grey, screenshot 0.15 px, mean,
+each lever alone on the first format):
+
+| Lever | Real music | Synthetic |
+|---|---|---|
+| Centred brightness | +0.08 dB | +0.86 dB |
+| Whitening with 1 time block instead of 32 | −0.62 dB | −0.03 dB |
+| Whitening with 8 time blocks | −0.28 dB | −0.10 dB |
+| Grain amplitude 62 instead of 75 | −0.94 dB | −0.31 dB |
+| Envelope range 36 dB instead of 54 dB | +0.01 dB | +0.23 dB |
+
+Consequences: Droplets is 0.09 dB better than Record on real music after a screenshot, not
+0.90 dB (that gain came mostly from one very tonal synthetic piece that clipped 1 % of its
+modules; real music clips 0.02 %). The 32 whitening time blocks are needed. Reducing the
+grain costs about three times more than the synthetic pieces suggested.
+
 ## Measured but not adopted
+
+The numbers in this section are from the synthetic pieces only; see the table above for how
+they change on real music.
 
 `scripts/explore_aesthetics.py` and `scripts/explore_shapes.py` keep the measurements behind
 the choices above. Audio SNR in dB after the simulated screenshot (q75, 0.15 px), colour,
