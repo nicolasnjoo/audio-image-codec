@@ -1,5 +1,6 @@
 """Deterministic DSP features used only for colour (never transmitted, no ML)."""
 import numpy as np
+from scipy.ndimage import gaussian_filter1d
 from scipy.signal import stft
 
 FS = 16000
@@ -36,6 +37,15 @@ def features(x):
                 flatness=flatness, rms=rms,
                 tonality=float(1 - np.median(flatness[active])),
                 brightness=float(np.median(centroid[active])))
+
+def tonal_centroid(ft, rel, sigma_frames=10):
+    """Per STFT frame: where the sounding notes sit on the circle of fifths, as an angle in
+    turns relative to the major triad on pitch class `rel` (0 = that triad), and how
+    concentrated they are (0 = noise, ~0.64 = a clean triad, 1 = a single note)."""
+    ch = gaussian_filter1d(ft["chroma"], sigma_frames, axis=1, mode="nearest")
+    ang = 2*np.pi*((7*(np.arange(12) - rel)) % 12)/12
+    z = (ch*np.exp(1j*ang)[:, None]).sum(0)/(ch.sum(0) + 1e-12)
+    return (np.angle(z) - np.pi/4)/(2*np.pi), np.abs(z)
 
 def tile_frame(t):
     """Tile t holds MDCT coefficients starting near sample 63*t."""

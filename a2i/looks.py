@@ -54,3 +54,26 @@ def tiles_to_canvas(v, cells, sigma=6.0, fill=None):
 def lerp_hue(a, b, t):
     d = ((b - a + 0.5) % 1.0) - 0.5
     return a + d*t
+
+def oklch_cbcr(L, C, h_turn):
+    """Chroma offsets (Cb, Cr) of the OKLCH colour (L, C, hue); hue in turns, 0 = red.
+    OKLCH is perceptually even, so equal C looks about equally vivid at every hue."""
+    h = 2*np.pi*(np.asarray(h_turn) + 29/360)
+    a, b = C*np.cos(h), C*np.sin(h)
+    l = (L + 0.3963377774*a + 0.2158037573*b)**3
+    m = (L - 0.1055613458*a - 0.0638541728*b)**3
+    s = (L - 0.0894841775*a - 1.2914855480*b)**3
+    lin = [4.0767416621*l - 3.3077115913*m + 0.2309699292*s,
+           -1.2684380046*l + 2.6097574011*m - 0.3413193965*s,
+           -0.0041960863*l - 0.7034186147*m + 1.7076147010*s]
+    g = [255*np.sign(v)*np.where(np.abs(v) <= 0.0031308, 12.92*np.abs(v),
+                                 1.055*np.abs(v)**(1/2.4) - 0.055) for v in lin]
+    return -0.168736*g[0] - 0.331264*g[1] + 0.5*g[2], 0.5*g[0] - 0.418688*g[1] - 0.081312*g[2]
+
+def best_luma(cb, cr, head=16.0):
+    """Luma at which the chroma direction (cb, cr) has the most room inside the RGB cube
+    (yellow: high, blue and red: low)."""
+    d = np.array([_K[i, 0]*cb + _K[i, 1]*cr for i in range(3)])/np.hypot(cb, cr)
+    ys = np.arange(40, 216)
+    room = [min(((255 - head - y)/v if v > 0 else (y - head)/-v) for v in d if abs(v) > 1e-9) for y in ys]
+    return int(ys[int(np.argmax(room))])

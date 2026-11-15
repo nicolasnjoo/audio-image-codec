@@ -1,11 +1,14 @@
-"""Render the four looks for the three pieces and measure them (section 7F, 7G)."""
+"""Render the looks for the three pieces and measure them (section 7F, 7G).
+The four original looks use the first format. Droplets (the adopted default) uses the format
+additions: centred brightness, smooth envelope, a layout generated from the notes, ripple."""
 import json, numpy as np
 from PIL import Image
-from scipy.ndimage import gaussian_filter, map_coordinates
+from scipy.ndimage import gaussian_filter, gaussian_filter1d, map_coordinates
 from _common import OUT, compare, save_json
-from a2i.codec import encode_luma, decode, layout, CANVAS, INNER, NT
-from a2i.looks import colorize, hue_cbcr, tiles_to_canvas, lerp_hue
-from a2i.features import features, tile_frame
+from a2i import shapes
+from a2i.codec import encode_luma, decode, layout, prepare, CANVAS, INNER, NT
+from a2i.looks import colorize, hue_cbcr, tiles_to_canvas, lerp_hue, oklch_cbcr, best_luma
+from a2i.features import features, tile_frame, tonal_centroid
 from a2i.channel import transmit, snr
 from a2i.testsignals import PIECES
 
@@ -72,15 +75,57 @@ def look_poster(Y, ft, pal, cells):
     rad = 70*pal["sat"]*(0.35 + 0.65*glow)
     return hue_cbcr(hue, rad)
 
+def look_droplets(Y, ft, pal, cells, tmap, span=0.45, vivid=1.0, loud_shift=0.06, blur=5.0, tsig=10):
+    """Colour that follows the time path continuously, so it has no 16 px steps.
+    tmap       tile-time of every canvas pixel (from a2i.shapes)
+    hue        key hue + span * harmony (tonal centroid on the circle of fifths) + a small
+               loudness shift. span 0.45 keeps related colours around the key hue.
+    vividness  how clearly tonal the moment is, times loudness. Perceptual (OKLCH) wheel."""
+    t = per_tile(ft, pal)
+    j = np.clip(tile_frame(np.arange(NT)), 0, ft["S"].shape[1] - 1)
+    turn, mag = tonal_centroid(ft, pal["rel"], tsig)
+    loud = gaussian_filter1d(t["loud"], 6, mode="nearest")
+    hue = pal["h0"] + span*turn[j] + pal["sgn"]*loud_shift*(loud - 0.5)
+    v = vivid*(0.45 + 0.55*np.clip(mag[j]/0.64, 0, 1))*(0.4 + 0.6*loud)
+    cb_t, cr_t = oklch_cbcr(0.62, 0.03 + 0.17*v, hue)
+    return (gaussian_filter(np.interp(tmap, np.arange(NT), cb_t), blur),
+            gaussian_filter(np.interp(tmap, np.arange(NT), cr_t), blur))
+
+def brightness_for(pal):
+    """Encoder policy (not a decoder constant): the median tile is drawn at the luma where the
+    key hue has the most room, limited to 128..165. When it is raised, loud moments are drawn
+    dark (negative A_ENV) so that they move towards mid grey instead of clipping."""
+    centre = float(np.clip(best_luma(*oklch_cbcr(0.62, 0.15, pal["h0"])), 128, 165))
+    return centre, (-1.0 if centre > 128 else 1.0)
+
 LOOKS = {
     "Record":  ("spiral_in", look_record),
     "Mandala": ("spiral_in", look_mandala),
     "Duotone": ("hilbert",   look_duotone),
     "Poster":  ("hilbert",   look_poster),
 }
+DEFAULT_LOOK = "Droplets"
+ALL_LOOKS = list(LOOKS) + [DEFAULT_LOOK]
+SMOOTH = 1.0                                # adopted envelope blend width (tiles)
+
+def render_droplets(x, a_env=A_ENV, a_res=A_RES, ripple=shapes.RIPPLE, shape="droplets",
+                    hue_brightness=True, chroma_kw=None):
+    """The adopted look. The side dict holds only header-sized fields for the layout: the shape
+    name, the 12 pitch-class weights and the ripple amplitude; decode() rebuilds the rest."""
+    ft = features(prepare(x)); pal = palette(ft)
+    spec = dict(name=shape, w=shapes.descriptor(ft)["w"], ripple=ripple)
+    cells, under, tmap = shapes.build(**spec)
+    centre, sign = brightness_for(pal) if hue_brightness else (128.0, 1.0)
+    Y, side, info = encode_luma(x, cells=cells, a_env=sign*a_env, a_res=a_res,
+                                centre=centre, smooth=SMOOTH, under=under)
+    side.update(cells=None, under=None, shape=spec)
+    cb, cr = look_droplets(Y, ft, pal, cells, tmap, **(chroma_kw or {}))
+    return colorize(Y, cb, cr), Y, side, info, ft
 
 def render(x, name, a_env=A_ENV, a_res=A_RES):
     """Encode audio x with look `name`. Returns rgb (uint8), float luma Y, side, info, features."""
+    if name == DEFAULT_LOOK:
+        return render_droplets(x, a_env, a_res)
     lay, chroma_fn = LOOKS[name]
     cells = layout(lay)
     Y, side, info = encode_luma(x, cells=cells, a_env=a_env, a_res=a_res)
@@ -98,7 +143,7 @@ if __name__ == "__main__":
     results, meta = {}, {}
     for pk, fn in PIECES.items():
         x = fn()
-        for name in LOOKS:
+        for name in ALL_LOOKS:
             rgb, Y, side, info, ft = render(x, name)
             pal = palette(ft)
             meta[pk] = dict(key=ft["key"], bpm=round(ft["bpm"]), tonality=round(ft["tonality"], 2),
@@ -112,15 +157,17 @@ if __name__ == "__main__":
     print("features:", json.dumps(meta))
 
     rows = []
-    for name, (rc, rg, rd) in REF_F.items():
+    for name in ALL_LOOKS:
+        rc, rg, rd = REF_F.get(name, (None, None, None))      # Droplets is new: no reference values
+        ref = (lambda v: v) if name in REF_F else (lambda v: None)
         c = np.array([results[f"{name}/{pk}"]["colour"] for pk in PIECES])   # (piece, condition)
         g = np.array([results[f"{name}/{pk}"]["grey"] for pk in PIECES])
         rows += [(f"{name}: colour, screenshot 0.15 px", c[:, 1].mean(), rc),
                  (f"{name}: grey, screenshot 0.15 px", g[:, 1].mean(), rg),
                  (f"{name}: cost (colour - grey)", c[:, 1].mean() - g[:, 1].mean(), rd),
-                 (f"{name}: colour, lossless", c[:, 0].mean(), 30.5),
+                 (f"{name}: colour, lossless", c[:, 0].mean(), ref(30.5)),
                  (f"{name}: grey, lossless", g[:, 0].mean(), None),
-                 (f"{name}: colour, worst", c[:, 2].mean(), 7.3)]
+                 (f"{name}: colour, worst", c[:, 2].mean(), ref(7.3))]
         if name == "Duotone":
             rows.append(("Duotone: cost on worst piece", (c[:, 1] - g[:, 1]).min(), -0.35))
     table = compare("7F. Looks at 60/75, mean of pieces A/B/C - audio SNR (dB)", rows)

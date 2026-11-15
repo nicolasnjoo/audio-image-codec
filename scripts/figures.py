@@ -1,5 +1,5 @@
 """Contact sheets, decoded WAVs (16-bit mono 16 kHz) and the spectrogram degradation figure.
-Everything uses the recommended settings (Record look, spiral_in, 60/75) unless labelled.
+WAVs and spectrograms use the adopted default look (Droplets, 60/75).
 Run render_options.py first if you only want the 12 look PNGs; this script re-renders
 what it needs, so it can also be run on its own."""
 import wave
@@ -13,7 +13,7 @@ from _common import OUT, save_json
 from a2i.codec import encode_luma, decode, layout, FS
 from a2i.channel import transmit, CONDITIONS, snr, segsnr
 from a2i.testsignals import PIECES
-from render_options import render, LOOKS
+from render_options import render, LOOKS, ALL_LOOKS, DEFAULT_LOOK
 
 INK, PAPER = (30, 30, 30), (250, 250, 248)
 
@@ -67,25 +67,27 @@ def degradation_figure(path, pk, x, decoded):
     cb = fig.colorbar(img, ax=axes, shrink=0.85, pad=0.01)
     cb.set_label("magnitude (dB re. loudest bin of the original)", fontsize=10)
     cb.outline.set_visible(False)
-    fig.suptitle(f"Piece {pk}: spectrogram after each channel condition (Record look, spiral_in, 60/75)",
+    fig.suptitle(f"Piece {pk}: spectrogram after each channel condition ({DEFAULT_LOOK} look, 60/75)",
                  fontsize=13, x=0.01, ha="left")
     fig.savefig(path, dpi=110); plt.close(fig)
 
 if __name__ == "__main__":
     X = {pk: fn() for pk, fn in PIECES.items()}
 
-    # 1. looks: 12 PNGs + contact sheets
+    # 1. looks: 15 PNGs + contact sheets (Droplets first: it is the default)
+    order = [DEFAULT_LOOK] + list(LOOKS)
+    lay = {n: (LOOKS[n][0] if n in LOOKS else "layout from the notes") for n in order}
     looks = {}
     for pk, x in X.items():
-        for name in LOOKS:
+        for name in ALL_LOOKS:
             looks[name, pk] = render(x, name)
             Image.fromarray(looks[name, pk][0]).save(OUT / f"look_{name}_{pk}.png")
     keys = {pk: looks["Record", pk][4]["key"] for pk in X}
-    sheet(OUT / "sheet_looks_A.png", [(f"{n} ({LOOKS[n][0]})", looks[n, "A"][0]) for n in LOOKS], 2, 540,
-          "Piece A, four looks, A_ENV/A_RES 60/75")
+    sheet(OUT / "sheet_looks_A.png", [(f"{n} ({lay[n]})", looks[n, "A"][0]) for n in order], 3, 540,
+          "Piece A, five looks, A_ENV/A_RES 60/75 (Droplets is the default)")
     sheet(OUT / "sheet_looks_all.png",
-          [(f"{n} - piece {pk} ({keys[pk]})", looks[n, pk][0]) for pk in X for n in LOOKS], 4, 400,
-          "Four looks x three pieces, A_ENV/A_RES 60/75 (rows: pieces A, B, C)")
+          [(f"{n} - piece {pk} ({keys[pk]})", looks[n, pk][0]) for pk in X for n in order], 5, 400,
+          "Five looks x three pieces, A_ENV/A_RES 60/75 (rows: pieces A, B, C)")
 
     # 2. lever sheets (grey, piece A)
     sheet(OUT / "sheet_layouts.png",
@@ -103,7 +105,7 @@ if __name__ == "__main__":
     (OUT / "wav").mkdir(exist_ok=True)
     table = {}
     for pk in X:
-        rgb, Y, side, info, _ = looks["Record", pk]
+        rgb, Y, side, info, _ = looks[DEFAULT_LOOK, pk]
         x = info["x"]; write_wav(OUT / "wav" / f"{pk}_0_original.wav", x)
         decoded = []
         for i, (name, q, s, r) in enumerate(CONDITIONS, 1):

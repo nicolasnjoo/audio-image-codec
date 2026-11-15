@@ -1,9 +1,10 @@
-"""The experimental harness must equal the format when every lever is off, and stay exact when on."""
+"""The experimental harness is the codec plus two variable constants: check that it stays so."""
 import numpy as np
 from a2i import codec
 from a2i.channel import snr
 from a2i.testsignals import piece_a
-from explore_aesthetics import disc_layout, envelope_field, encode_x, decode_x, FREE
+from a2i.codec import envelope_field
+from explore_aesthetics import disc_layout, encode_x, decode_x, FREE
 
 def test_disc_layout_is_a_permutation_from_rim_to_centre():
     cells = disc_layout(True)

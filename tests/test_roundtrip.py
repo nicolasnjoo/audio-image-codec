@@ -74,3 +74,48 @@ def test_pieces_are_deterministic_and_prepared():
     for fn in PIECES.values():
         a, b = fn(), fn()
         assert np.array_equal(a, b) and a.shape == (codec.NS,)
+
+# ---------------------------------------------------------------- format additions
+def _unclipped(P, under=None):
+    Y = np.full((codec.CANVAS, codec.CANVAS), 128.0)
+    o, n = codec.ORIGIN, codec.INNER
+    Y[o:o+n, o:o+n] = 128 + np.kron(P, np.ones((codec.BMOD, codec.BMOD)))
+    if under is not None:
+        Y[o:o+n, o:o+n] += under[o:o+n, o:o+n]
+    return Y
+
+def test_defaults_still_produce_the_first_format(xa):
+    Y, side, info = codec.encode_luma(xa, cells=codec.layout("spiral_in"), a_env=60, a_res=75)
+    assert side["shift"] == 0.0 and side["smooth"] == 0.0 and side["under"] is None
+    env, R, _ = codec.normalize(codec.pack(codec.whiten(codec.analyze(info["x"]))[0]))
+    tiles = Y[28:1052, 28:1052].reshape(64, 16, 64, 16)
+    cells = codec.layout("spiral_in")
+    means = tiles.mean(axis=(1, 3)).reshape(-1)[cells]
+    unclipped = ((tiles.min(axis=(1, 3)) > 0) & (tiles.max(axis=(1, 3)) < 255)).reshape(-1)[cells]
+    assert unclipped.mean() > 0.9
+    assert np.abs(means - (128 + 60*env))[unclipped].max() < 1e-9   # uncentred: mean = 128 + A_ENV*env
+
+def test_smooth_envelope_and_ripple_are_exact_inverses(xa):
+    x = codec.prepare(xa)
+    env, R, ref = codec.normalize(codec.pack(codec.whiten(codec.analyze(x))[0]))
+    cells = codec.layout("hilbert")
+    under = 8*np.cos(np.add.outer(np.arange(codec.CANVAS), np.arange(codec.CANVAS))/9.0)
+    for a_env in (60.0, -60.0):                                 # loud = bright and loud = dark
+        P = codec.modulate(env, R, cells, a_env, 75, shift=-21.0, smooth=1.0)
+        env2, R2 = codec.demodulate(_unclipped(P, under), cells, a_env, 75, shift=-21.0, smooth=1.0, under=under)
+        assert np.allclose(env2, env, atol=1e-9) and np.allclose(R2, R, atol=1e-9)
+
+def test_smooth_envelope_keeps_every_tile_mean():
+    E = np.random.default_rng(0).uniform(-60, 60, (codec.SIDE, codec.SIDE))
+    for w in (0.5, 1.0):
+        means = codec.envelope_field(E, w).reshape(codec.SIDE, codec.T, codec.SIDE, codec.T).mean(axis=(1, 3))
+        assert np.abs(means - E).max() < 1e-9
+    assert np.array_equal(codec.envelope_field(E, 0), np.kron(E, np.ones((codec.T, codec.T))))
+
+def test_centre_puts_the_median_tile_on_the_requested_luma(xa):
+    for centre, a_env in ((128, 60.0), (165, -60.0)):           # a bright centre goes with loud = dark
+        Y, side, info = codec.encode_luma(xa, cells=codec.layout("raster"), a_env=a_env, a_res=75,
+                                          centre=centre, smooth=1.0)
+        assert side["shift"] == round(side["shift"])            # one integer for the header
+        assert abs(128 + a_env*np.median(info["env"]) + side["shift"] - centre) <= 0.5
+        assert snr(info["x"], codec.decode(Y, side)) >= 30.0

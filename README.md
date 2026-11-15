@@ -11,15 +11,15 @@ No ML, no third-party audio codec.
 
 Status: Python prototype. `frame` (finder patterns + header) and `register` (alignment)
 are not built yet; side information is still passed out of band and alignment error is
-simulated as a sub-pixel shift.
+simulated as a sub-pixel shift. The default look is **Droplets**.
 
 ## Layout
 
 ```
-a2i/        mdct.py  codec.py  channel.py  looks.py  features.py  testsignals.py
+a2i/        mdct.py  codec.py  shapes.py  channel.py  looks.py  features.py  testsignals.py
 scripts/    check_baseline.py  levers.py  colour_test.py  render_options.py
             loss_budget.py  figures.py
-            explore_aesthetics.py  shapes.py   (experimental, not the format)
+            explore_aesthetics.py  explore_shapes.py   (experimental, not the format)
 tests/      test_mdct.py  test_roundtrip.py  test_determinism.py  test_colorize.py
             test_explore.py  test_shapes.py
 out/        generated images, WAVs, JSON (git-ignored)
@@ -35,20 +35,20 @@ Pipeline, one function per stage:
 ```
 python -m venv .venv
 .venv/bin/pip install -r requirements.txt pytest
-.venv/bin/python -m pytest -q                  # 47 tests, ~40 s
+.venv/bin/python -m pytest -q                  # 54 tests, ~40 s
 
 .venv/bin/python scripts/check_baseline.py     # MDCT reconstruction + grey baseline
 .venv/bin/python scripts/levers.py             # layout / contrast / grain levers
 .venv/bin/python scripts/colour_test.py        # colour fix regression
-.venv/bin/python scripts/loss_budget.py        # loss budget at the recommended settings
-.venv/bin/python scripts/render_options.py     # four looks x three pieces, 12 PNGs
+.venv/bin/python scripts/loss_budget.py        # loss budget: Record (reference) and Droplets
+.venv/bin/python scripts/render_options.py     # five looks x three pieces, 15 PNGs
 .venv/bin/python scripts/figures.py            # contact sheets, WAVs, spectrogram figures
 ```
 
-Each script prints its measurements next to the reference values, flags anything outside
-±0.3 dB, and writes a JSON copy to `out/`. Python ≥ 3.10.
+Each script prints its measurements next to the reference values where they exist, flags
+anything outside ±0.3 dB, and writes a JSON copy to `out/`. Python ≥ 3.10.
 
-## Format (current version)
+## Format
 
 | Constant | Value |
 |---|---|
@@ -57,59 +57,82 @@ Each script prints its measurements next to the reference values, flags anything
 | Canvas | 1080 × 1080 px; data square 1024 × 1024 px at offset 28; border neutral (reserved) |
 | Module / tile | 2 × 2 px module; 8 × 8 modules per tile; 64 × 64 tiles; 1 DC + 63 AC slots per tile |
 | Capacity | 4096 × 63 = 258 048 coefficients = all of them |
-| Luma amplitudes | envelope `A_ENV = 60`, texture `A_RES = 75` (recommended) |
-| Layouts | `raster`, `serpentine`, `hilbert`, `spiral_in` |
+| Luma amplitudes | envelope `A_ENV = 60`, texture `A_RES = 75` |
+| Envelope range | 9 log2 units (54 dB) below the loudest tile |
+
+Adopted on top of the first format (used by Droplets; every codec function default still
+reproduces the first format, so the four original looks are byte-identical to before):
+
+| Addition | What it does | Side information |
+|---|---|---|
+| Centred brightness | The median tile is drawn at a chosen luma instead of wherever the music puts it (was 151–169) | `shift`, one integer |
+| Smooth envelope | Tile brightness is drawn as a smooth field that keeps every tile mean; the decoder rebuilds the field from the tile means and subtracts it | none (constant, blend 1.0 tile) |
+| Layout from the notes | Tiles are ordered along the contour lines of a landscape built from the notes (`a2i/shapes.py`) | 12 pitch-class weights, 4 bits each = 6 bytes |
+| Contour ripple | A light/dark wave of ±8 grey levels along the contours; the decoder knows it and subtracts it | none (constant) |
+
+Encoder policy, not a decoder constant: the centre luma follows the key hue (128–165), and
+when it is raised, loud moments are drawn dark (`A_ENV` negative).
+
+**Droplets:** one drop per prominent pitch class, placed on a 12-hour clock (tonic at 12
+o'clock, one hour per semitone), size = how much that note is used. The drops merge
+outwards. Time starts on the outermost contour and ends inside the drops. Colour follows the
+time path continuously; hue = key hue plus the harmony (tonal centroid on the circle of
+fifths).
+
+Not yet solved: the ordering uses floating-point sort keys. It is deterministic on one
+machine (tested), but a bit-exact cross-platform format needs an integer definition.
 
 ## Current numbers
 
 Measured on 2026-11-15 with Python 3.13.18, numpy 2.5.4, scipy 1.18.1, Pillow 13.0.0
-(libjpeg-turbo). Audio SNR in dB on three synthetic test pieces (A, B, C), recommended
-settings: Record look, `spiral_in` layout, 60/75. The channel is simulated
-(`a2i/channel.py`); no real phone screenshot has been measured yet.
+(libjpeg-turbo). Audio SNR in dB on three synthetic test pieces (A, B, C), Droplets look,
+60/75, decoded from the header-sized side information. The channel is simulated
+(`a2i/channel.py`); no real music and no real phone screenshot has been measured yet.
 
-| Condition | A | B | C | Mean |
-|---|---|---|---|---|
-| Float luma, no channel | 32.5 | 21.3 | 37.8 | 30.5 |
-| Lossless PNG | 32.5 | 21.3 | 37.7 | 30.5 |
-| JPEG q85 file | 23.6 | 19.7 | 24.4 | 22.6 |
-| Screenshot (q75, 1080→1179→1080), perfect alignment | 19.0 | 16.6 | 19.5 | 18.4 |
-| Screenshot, 0.15 px alignment error | 16.7 | 15.3 | 17.4 | 16.5 |
-| Screenshot, 0.35 px alignment error | 11.1 | 10.9 | 11.5 | 11.2 |
-| q60 screenshot, 0.5 px (worst case) | 7.0 | 7.3 | 7.4 | 7.3 |
+| Condition | A | B | C | Mean | Record, mean |
+|---|---|---|---|---|---|
+| Float luma, no channel | 37.3 | 28.3 | 41.6 | 35.7 | 30.5 |
+| Lossless PNG | 37.3 | 28.3 | 41.6 | 35.7 | 30.5 |
+| JPEG q85 file | 24.1 | 24.0 | 24.7 | 24.3 | 22.6 |
+| Screenshot (q75, 1080→1179→1080), perfect alignment | 19.5 | 19.4 | 19.8 | 19.6 | 18.4 |
+| Screenshot, 0.15 px alignment error | 17.3 | 17.3 | 17.5 | 17.4 | 16.5 |
+| Screenshot, 0.35 px alignment error | 11.3 | 11.7 | 11.7 | 11.6 | 11.2 |
+| q60 screenshot, 0.5 px (worst case) | 7.1 | 7.7 | 7.6 | 7.4 | 7.3 |
 
-Colour costs 0.06–0.20 dB after a screenshot (mean of the three pieces, per look).
-Piece B's 21 dB lossless ceiling is luma clipping (1.00 % of modules) on tonal material.
+"Record" is the previous default (first format); its numbers reproduce the project's
+reference values within 0.05 dB. Clipped modules with Droplets: A 0.01 %, B 0.33 %,
+C 0.05 % (Record: 0.02 %, 1.00 %, 0.02 %). Delivered colour (mean chroma radius; a pure
+primary is ~127): 47 with Droplets, 34 with Record.
+
 The MDCT stage alone reconstructs to > 270 dB except for the final 64 samples (4 ms),
 which are not reconstructed because the last half-window frame is not carried.
 
-## Experimental aesthetics (not part of the format)
+## Measured but not adopted
 
-`scripts/explore_aesthetics.py` and `scripts/shapes.py` test visual changes as optional
-parameters of an experimental encoder/decoder pair; `a2i/codec.py` is unchanged. Numbers are
-audio SNR in dB after the simulated screenshot (q75, 0.15 px), colour, mean of pieces A/B/C.
-Today's Record look is 16.48 dB with a delivered chroma radius of 34 (a pure primary is ~127).
+`scripts/explore_aesthetics.py` and `scripts/explore_shapes.py` keep the measurements behind
+the choices above. Audio SNR in dB after the simulated screenshot (q75, 0.15 px), colour,
+mean of pieces A/B/C.
 
-| Change | Effect on the image | SNR |
-|---|---|---|
-| Median tile at luma 128 (was 151–169) | Deeper colour, clipping 0.35 % → 0.11 % | 17.35 |
-| + smooth envelope (tile means kept, decoder subtracts it) | No 16 px luma blocks | 17.37 |
-| + round spiral layout | Rings instead of squares | 17.33 |
-| + colour drawn along the time path, hue follows the harmony | Round colour bands, chroma 45 | 17.32 |
-| + envelope range 36 dB (was 54 dB) | More contrast on beats | 17.16 |
-| + grain amplitude 62 (was 75) | Calmer texture, chroma 49 | 16.65 |
-| Contour ripple of ±14 grey levels (decoder subtracts it) | Shape visible on any music | −0.11 |
+| Step, cumulative from the Record look (16.48) | SNR |
+|---|---|
+| Median tile at luma 128 | 17.38 |
+| + smooth envelope | 17.40 |
+| + round spiral layout | 17.30 |
+| + colour along the time path, hue follows the harmony | 17.30 |
 
-Shapes from the music (`shapes.py`): a layout is an ordering of the 4096 tiles, so define a
-landscape over the image and let time run along its contour lines. The landscape is built from
-a 7-byte descriptor (12 pitch-class weights, brightness, tonality; 4 bits each). `flower`,
-`droplets` and `chladni` score 17.20, 17.17 and 16.88 dB with the ripple, against 17.07 dB for
-the disc. Not yet built: the header that would carry the descriptor, and an integer
-specification of the ordering (it uses float sort keys today).
+| Option on top of that | SNR |
+|---|---|
+| Envelope range 36 dB instead of 54 dB (more contrast on beats) | 17.16 |
+| Grain amplitude 62 instead of 75 (calmer texture, more colour) | 16.73 |
+| Loud moments drawn dark | 17.35 |
 
-```
-.venv/bin/python scripts/explore_aesthetics.py   # lever table, step ladder, out/explore_*.png
-.venv/bin/python scripts/shapes.py               # shape generators, out/shapes_*.png
-```
+| Droplets, ripple amplitude | 0 | 8 (adopted) | 14 | 22 |
+|---|---|---|---|---|
+| SNR | 17.38 | 17.38 | 17.28 | 17.06 |
+
+Other landscapes at ripple 8: round spiral 17.26, `flower` (the scale as a star) 17.39,
+`chladni` (vibrating-plate figure) 17.22. They read two more numbers from the music
+(brightness, tonality).
 
 ## Palette wording
 

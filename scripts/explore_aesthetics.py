@@ -1,34 +1,27 @@
-"""EXPERIMENTAL - aesthetic levers that are not part of the format.
+"""EXPERIMENTAL - aesthetic levers measured against the format.
 
-Nothing here changes a2i/codec.py. Each lever is an optional parameter of encode_x/decode_x,
-so its audio cost can be measured against the current format before anything is adopted:
+Centred brightness, the smooth envelope and the decodable ripple were adopted and now live in
+a2i/codec.py and a2i/shapes.py. This script keeps the measurements that led there, and the
+levers that were measured but NOT adopted:
 
-  centre   luma value given to the median tile (None = current mapping, 128 + A_ENV*env)
-  dr       envelope range in log2 units (current 9)
-  smooth   envelope drawn as a smooth, tile-mean-preserving field instead of 16 px blocks
-           (0 = blocks; 1 = linear blend across the whole tile); the decoder rebuilds the
-           same field from the decoded tile means and subtracts it before reading the AC slots
-  nblk     whitening time blocks (current 32)
-  layout   any codec layout, or "disc_in": a round spiral from the rim to the centre
-
-Colour (free: the decoder never reads it) adds a perceptual hue wheel, colour drawn in true
-polar coordinates (round rings, no 16 px steps) and a hue that follows the harmony.
+  dr       envelope range in log2 units (format: 9 = 54 dB)
+  nblk     whitening time blocks (format: 32)
+  a_res    grain amplitude (format: 75)
+  layout   any codec layout, "disc_in" (round spiral) or an explicit permutation
 
 Run:  python scripts/explore_aesthetics.py     (lever table, step ladder, sheets in out/explore_*.png)
 """
 import contextlib
 import numpy as np
 from PIL import Image
-from scipy.fft import dctn, idctn
-from scipy.ndimage import gaussian_filter, gaussian_filter1d
 from _common import OUT, save_json
-from a2i import codec
-from a2i.codec import NT, T, SIDE, G, BMOD, CANVAS, INNER, ORIGIN, _ZR, _ZC
-from a2i.looks import colorize, hue_cbcr, tiles_to_canvas, lerp_hue
-from a2i.features import features, tile_frame
+from a2i import codec, shapes
+from a2i.codec import INNER, ORIGIN
+from a2i.looks import colorize
+from a2i.features import features
 from a2i.channel import transmit, snr
 from a2i.testsignals import PIECES
-from render_options import palette, per_tile, render, look_record
+from render_options import palette, look_record, look_droplets
 
 KEY = [("lossless", None, False, 0.0), ("screenshot 0.15 px", 75, True, 0.15), ("worst", 60, True, 0.5)]
 SL = slice(ORIGIN, ORIGIN + INNER)
@@ -36,48 +29,18 @@ SL = slice(ORIGIN, ORIGIN + INNER)
 
 # ---------------------------------------------------------------- layout
 def disc_layout(inward=True):
-    """Round (Archimedean) spiral, one tile per turn. cells[t] = grid cell of tile t.
-    NOTE: uses float atan2/hypot; a shipped format would need an integer table instead."""
-    r, c = np.divmod(np.arange(NT), SIDE)
-    x = c - (SIDE - 1)/2; y = r - (SIDE - 1)/2
-    th = (np.arctan2(x, -y) % (2*np.pi))/(2*np.pi)          # 0 at 12 o'clock, clockwise
-    key = np.floor(np.hypot(x, y) - th) + th                # turn number + angle
-    order = np.lexsort((np.arange(NT), key))                # centre -> rim
-    return order[::-1].copy() if inward else order
+    """Round spiral, one tile per turn (the "disc" landscape of a2i.shapes)."""
+    cells = shapes.build("disc", ripple=0.0)[0]
+    return cells if inward else cells[::-1].copy()
 
 def get_layout(name):
-    """A codec layout name, "disc_in", or an explicit permutation (see scripts/shapes.py)."""
+    """A codec layout name, "disc_in", or an explicit permutation."""
     if isinstance(name, np.ndarray):
         return name
     return disc_layout(True) if name == "disc_in" else codec.layout(name)
 
 
-# ---------------------------------------------------------------- smooth envelope
-def _interp_matrix(w):
-    """U (G x SIDE): module <- tile-centre values; neighbours are blended linearly over the
-    fraction w of a tile centred on the tile boundary (w=1: plain linear interpolation)."""
-    U = np.zeros((G, SIDE))
-    p = (np.arange(G) + 0.5)/T - 0.5                        # module position in tile-centre units
-    t0 = np.clip(np.floor(p).astype(int), 0, SIDE - 2)
-    u = np.clip(p - t0, 0, 1)
-    b = np.clip((u - (1 - w)/2)/w, 0, 1)
-    U[np.arange(G), t0] = 1 - b; U[np.arange(G), t0 + 1] += b
-    return U
-
-_FIELD = {}
-def envelope_field(E, w):
-    """E: (SIDE, SIDE) tile means in luma units -> (G, G) module plane with exactly those tile means."""
-    if not w:
-        return np.kron(E, np.ones((T, T)))
-    if w not in _FIELD:
-        U = _interp_matrix(w)
-        K = U.reshape(SIDE, T, SIDE).mean(1)                # tile mean of the interpolant
-        _FIELD[w] = (U, np.linalg.inv(K))
-    U, Ki = _FIELD[w]
-    return U @ (Ki @ E @ Ki.T) @ U.T
-
-
-# ---------------------------------------------------------------- experimental codec
+# ---------------------------------------------------------------- format + the two unadopted constants
 @contextlib.contextmanager
 def _patched(**kw):
     old = {k: getattr(codec, k) for k in kw}
@@ -91,37 +54,16 @@ def _patched(**kw):
 
 def encode_x(x, layout="spiral_in", a_env=60.0, a_res=75.0, centre=None, dr=9.0, smooth=0.0,
              nblk=32, under=None):
-    x = codec.prepare(x)
-    cells = get_layout(layout)
+    """codec.encode_luma with the envelope range and the whitening blocks made variable."""
     with _patched(DR=dr, NBLK=nblk):
-        W, gains = codec.whiten(codec.analyze(x))
-        env, R, ref = codec.normalize(codec.pack(W))
-    shift = 0.0 if centre is None else centre - 128.0 - a_env*float(np.median(env))
-    V = np.zeros((NT, T, T)); V[:, _ZR, _ZC] = a_res*R
-    tex = idctn(V, axes=(1, 2), norm="ortho")
-    placed = np.empty_like(tex); placed[cells] = tex
-    P = placed.reshape(SIDE, SIDE, T, T).transpose(0, 2, 1, 3).reshape(G, G)
-    E = np.empty(NT); E[cells] = a_env*env + shift
-    P = P + envelope_field(E.reshape(SIDE, SIDE), smooth)
-    Yun = np.full((CANVAS, CANVAS), 128.0)
-    Yun[SL, SL] = 128 + np.kron(P, np.ones((BMOD, BMOD))) + (0 if under is None else under[SL, SL])
-    clip = float(((Yun < 0) | (Yun > 255)).mean()*(CANVAS/INNER)**2)
-    side = dict(gains=gains, ref=ref, cells=cells, a_env=a_env, a_res=a_res, shift=shift, dr=dr,
-                smooth=smooth, nblk=nblk, under=under)
-    return np.clip(Yun, 0, 255), side, dict(x=x, env=env, clip=clip)
+        Y, side, info = codec.encode_luma(x, cells=get_layout(layout), a_env=a_env, a_res=a_res,
+                                          centre=centre, smooth=smooth, under=under)
+    side.update(dr=dr, nblk=nblk)
+    return Y, side, info
 
 def decode_x(Y, s):
-    Y = codec.luma(Y)
-    inner = Y[SL, SL] - 128.0 - (0 if s["under"] is None else s["under"][SL, SL])
-    P = inner.reshape(G, BMOD, G, BMOD).mean(axis=(1, 3))
-    E = P.reshape(SIDE, T, SIDE, T).mean(axis=(1, 3))
-    res = P - envelope_field(E, s["smooth"])
-    grid = res.reshape(SIDE, T, SIDE, T).transpose(0, 2, 1, 3).reshape(NT, T, T)[s["cells"]]
-    V = dctn(grid, axes=(1, 2), norm="ortho")
-    env = np.clip((E.reshape(-1)[s["cells"]] - s["shift"])/s["a_env"], -1, 1)
-    R = np.clip(V[:, _ZR, _ZC]/s["a_res"], -1, 1)
     with _patched(DR=s["dr"], NBLK=s["nblk"]):
-        return codec.synthesize(codec.unwhiten(codec.unpack(codec.denormalize(env, R, s["ref"])), s["gains"]))
+        return codec.decode(Y, s)
 
 
 # ---------------------------------------------------------------- measures
@@ -143,64 +85,14 @@ def measure(X, colour=None, **kw):
     return np.mean(per, 0), 100*float(np.mean(clips)), (float(np.mean(chroma)) if chroma else None), np.array(per)
 
 
-# ---------------------------------------------------------------- colour: "harmony"
-def tonal_centroid(ft, pal, sigma_frames=10):
-    """Per STFT frame: where the sounding notes sit on the circle of fifths (angle, relative
-    to the key) and how concentrated they are (0 = noise, ~0.64 = a clean triad, 1 = one note)."""
-    ch = gaussian_filter1d(ft["chroma"], sigma_frames, axis=1, mode="nearest")
-    ang = 2*np.pi*((7*(np.arange(12) - pal["rel"])) % 12)/12
-    z = (ch*np.exp(1j*ang)[:, None]).sum(0)/(ch.sum(0) + 1e-12)
-    return (np.angle(z) - np.pi/4)/(2*np.pi), np.abs(z)      # 0 turns = tonic major triad
-
-def oklch_cbcr(L, C, h_turn):
-    """Chroma offsets (Cb, Cr) of the OKLCH colour (L, C, hue). Hue in turns, 0 = red.
-    OKLCH is perceptually even, so equal C looks equally vivid at every hue."""
-    h = 2*np.pi*(np.asarray(h_turn) + 29/360)
-    a, b = C*np.cos(h), C*np.sin(h)
-    l = (L + 0.3963377774*a + 0.2158037573*b)**3
-    m = (L - 0.1055613458*a - 0.0638541728*b)**3
-    s = (L - 0.0894841775*a - 1.2914855480*b)**3
-    lin = [4.0767416621*l - 3.3077115913*m + 0.2309699292*s,
-           -1.2684380046*l + 2.6097574011*m - 0.3413193965*s,
-           -0.0041960863*l - 0.7034186147*m + 1.7076147010*s]
-    g = [255*np.sign(v)*np.where(np.abs(v) <= 0.0031308, 12.92*np.abs(v),
-                                 1.055*np.abs(v)**(1/2.4) - 0.055) for v in lin]
-    return -0.168736*g[0] - 0.331264*g[1] + 0.5*g[2], 0.5*g[0] - 0.418688*g[1] - 0.081312*g[2]
-
-_TMAP = []
-def disc_time_map():
-    """Tile-time coordinate (0 = first tile) of every canvas pixel for the disc_in layout,
-    continuous along the spiral, so colour can be drawn round instead of per 16 px tile."""
-    if not _TMAP:
-        r, c = np.divmod(np.arange(NT), SIDE)
-        x = c - (SIDE - 1)/2; y = r - (SIDE - 1)/2
-        th = (np.arctan2(x, -y) % (2*np.pi))/(2*np.pi)
-        keys = np.sort(np.floor(np.hypot(x, y) - th) + th)
-        p = (np.arange(CANVAS) - ORIGIN + 0.5)/(T*BMOD) - SIDE/2
-        xx, yy = np.meshgrid(p, p)
-        thp = (np.arctan2(xx, -yy) % (2*np.pi))/(2*np.pi)
-        _TMAP.append(NT - 1 - np.interp(np.floor(np.hypot(xx, yy) - thp) + thp, keys, np.arange(NT)))
-    return _TMAP[0]
-
-def look_rings(Y, ft, pal, cells, span=0.45, vivid=1.0, loud_shift=0.06, blur=5.0, tsig=10, tmap=None):
-    """Colour that follows the time path continuously (round rings for the disc_in layout).
-    tmap       = tile-time of every canvas pixel; None = the disc_in layout
-    hue        = key hue + span * harmony (tonal centroid) + a small loudness shift
-    vividness  = how clearly tonal the moment is, times loudness
-    span 0.45  = related colours around the key hue; 1.0 = each chord gets its own hue
-    tsig       = time smoothing of the harmony in 16 ms frames (2 shows single notes)"""
+# ---------------------------------------------------------------- colour along the time path
+def look_rings(Y, ft, pal, cells, tmap=None, **kw):
+    """render_options.look_droplets on the round spiral (or any layout, given its tmap).
+    Options: span (0.45 related hues, 1.0 one hue per chord), tsig (2 shows single notes)."""
     if tmap is None:
         assert np.array_equal(cells, disc_layout(True)), "look_rings needs disc_in or an explicit tmap"
-        tmap = disc_time_map()
-    t = per_tile(ft, pal)
-    j = np.clip(tile_frame(np.arange(NT)), 0, ft["S"].shape[1] - 1)
-    turn, mag = tonal_centroid(ft, pal, tsig)
-    loud = gaussian_filter1d(t["loud"], 6, mode="nearest")
-    hue = pal["h0"] + span*turn[j] + pal["sgn"]*loud_shift*(loud - 0.5)
-    v = vivid*(0.45 + 0.55*np.clip(mag[j]/0.64, 0, 1))*(0.4 + 0.6*loud)
-    cb_t, cr_t = oklch_cbcr(0.62, 0.03 + 0.17*v, hue)
-    return (gaussian_filter(np.interp(tmap, np.arange(NT), cb_t), blur),
-            gaussian_filter(np.interp(tmap, np.arange(NT), cr_t), blur))
+        tmap = shapes.build("disc", ripple=0.0)[2]
+    return look_droplets(Y, ft, pal, cells, tmap, **kw)
 
 def render_x(x, chroma_fn=look_rings, chroma_kw=None, **kw):
     """Experimental render: returns rgb, Y, side, info, features."""
@@ -225,7 +117,7 @@ def closeup(rgb, at=150, size=200, zoom=2):
     return np.asarray(Image.fromarray(rgb[c, c]).resize((size*zoom, size*zoom), Image.NEAREST))
 
 
-FREE = dict(layout="disc_in", centre=128, smooth=1.0, dr=6.0)       # the candidate, grain unchanged
+FREE = dict(layout="disc_in", centre=128, smooth=1.0)       # the adopted changes on a round spiral
 
 if __name__ == "__main__":
     from figures import sheet
@@ -262,10 +154,10 @@ if __name__ == "__main__":
         ("2 + luma centred on 128",        look_record, dict(layout="spiral_in", centre=128)),
         ("3 + smooth envelope",            look_record, dict(layout="spiral_in", centre=128, smooth=1.0)),
         ("4 + round spiral",               look_record, dict(layout="disc_in", centre=128, smooth=1.0)),
-        ("5 + round harmony colour",       look_rings,  dict(layout="disc_in", centre=128, smooth=1.0)),
-        ("6 + envelope range 36 dB",       look_rings,  dict(FREE)),
-        ("7 + grain 62 (was 75)",          look_rings,  dict(FREE, a_res=62.0)),
-        ("8 + loud = dark",                look_rings,  dict(FREE, a_res=62.0, a_env=-60.0)),
+        ("5 + round harmony colour",       look_rings,  dict(FREE)),
+        ("6 option: envelope 36 dB",       look_rings,  dict(FREE, dr=6.0)),
+        ("7 option: grain 62 (was 75)",    look_rings,  dict(FREE, a_res=62.0)),
+        ("8 option: loud = dark",          look_rings,  dict(FREE, a_env=-60.0)),
     ]
     print("\n2. Step ladder, colour, mean of A/B/C - SNR (dB) lossless / screenshot 0.15 px / worst;"
           " delivered chroma radius; clip %")
@@ -280,7 +172,7 @@ if __name__ == "__main__":
           [(f"{n}: {L[n]['snr']['A'][1]:.1f} dB", L[n]["img"]["A"]) for n, _, _ in ladder], 4, 400,
           "Piece A, one change at a time (dB = audio SNR after a simulated screenshot, 0.15 px)")
 
-    old, new, calm = L[ladder[0][0]], L[ladder[5][0]], L[ladder[6][0]]
+    old, new, calm = L[ladder[0][0]], L[ladder[4][0]], L[ladder[6][0]]
     cells = []
     for pk in X:
         cells += [(f"{pk} today: {old['snr'][pk][1]:.1f} dB, colour {old['chroma'][pk]:.0f}", old["img"][pk]),
