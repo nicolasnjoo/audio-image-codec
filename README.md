@@ -110,20 +110,20 @@ which are not reconstructed because the last half-window frame is not carried.
 ## Real music
 
 `scripts/real_music.py NAME=file.wav ... --at 0,60,120` runs any PCM WAV through the same
-pipeline (decode MP3 first, for example with ffmpeg). Measured on nine 16.128 s excerpts:
-three commercial pop/rock songs (MP3 320 kbit/s, 44.1 kHz stereo), starting at 0, 60 and
-120 s. Droplets look. SNR is against the prepared signal (mono, 16 kHz), so the deliberate
-loss of stereo and of everything above 8 kHz is not counted. No audio is stored in this
-repository; `out/` is git-ignored.
+pipeline (decode MP3 first, for example with ffmpeg). Measured on twelve 16.128 s excerpts:
+four commercial songs (MP3, 44.1 or 48 kHz stereo), starting at 0, 60 and 120 s. Droplets
+look. SNR is against the prepared signal (mono, 16 kHz), so the deliberate loss of stereo
+and of everything above 8 kHz is not counted. No audio is stored in this repository;
+`out/` is git-ignored.
 
-| Condition | Mean of 9 | Minimum | Synthetic mean |
+| Condition | Mean of 12 | Minimum | Synthetic mean |
 |---|---|---|---|
-| Lossless PNG | 38.7 | 33.6 | 35.7 |
+| Lossless PNG | 38.1 | 32.8 | 35.7 |
 | JPEG q85 file | 23.6 | 22.9 | 24.3 |
-| Screenshot, perfect alignment | 19.0 | 18.4 | 19.6 |
-| Screenshot, 0.15 px alignment error | 16.9 | 16.4 | 17.4 |
+| Screenshot, perfect alignment | 19.1 | 18.4 | 19.6 |
+| Screenshot, 0.15 px alignment error | 17.0 | 16.4 | 17.4 |
 | Screenshot, 0.35 px alignment error | 11.4 | 11.1 | 11.6 |
-| q60 screenshot, 0.5 px (worst case) | 7.3 | 7.1 | 7.4 |
+| q60 screenshot, 0.5 px (worst case) | 7.35 | 7.1 | 7.4 |
 
 Segmental SNR is lower on sparse passages: 15.3 dB after the screenshot and 6.3 dB in the
 worst case for the quietest excerpt.
@@ -133,16 +133,25 @@ each lever alone on the first format):
 
 | Lever | Real music | Synthetic |
 |---|---|---|
-| Centred brightness | +0.08 dB | +0.86 dB |
-| Whitening with 1 time block instead of 32 | −0.62 dB | −0.03 dB |
-| Whitening with 8 time blocks | −0.28 dB | −0.10 dB |
-| Grain amplitude 62 instead of 75 | −0.94 dB | −0.31 dB |
-| Envelope range 36 dB instead of 54 dB | +0.01 dB | +0.23 dB |
+| Centred brightness | +0.13 dB | +0.86 dB |
+| Whitening with 1 time block instead of 32 | −0.51 dB | −0.03 dB |
+| Whitening with 8 time blocks | −0.22 dB | −0.10 dB |
+| Grain amplitude 62 instead of 75 | −0.90 dB | −0.31 dB |
+| Envelope range 36 dB instead of 54 dB | +0.02 dB | +0.23 dB |
 
-Consequences: Droplets is 0.09 dB better than Record on real music after a screenshot, not
+Consequences: Droplets is 0.14 dB better than Record on real music after a screenshot, not
 0.90 dB (that gain came mostly from one very tonal synthetic piece that clipped 1 % of its
 modules; real music clips 0.02 %). The 32 whitening time blocks are needed. Reducing the
 grain costs about three times more than the synthetic pieces suggested.
+
+Envelope range on real music: 95 % of the 4 ms moments lie within 22 dB of the loudest
+moment of their clip, and 1.4 % lie more than 36 dB below it. With the Droplets look:
+
+| Envelope range | Screenshot SNR | Worst case | Tile brightness spread | Moments at the end of the scale |
+|---|---|---|---|---|
+| 54 dB (format) | 17.01 dB | 7.35 dB | 11.4 grey levels | 0.9 % |
+| 36 dB | 16.96 dB | 7.32 dB | 14.6 grey levels | 1.3 % |
+| 24 dB | 16.77 dB | 7.25 dB | 18.9 grey levels | 3.1 % (17.6 % in the sparsest excerpt) |
 
 ## Measured but not adopted
 
