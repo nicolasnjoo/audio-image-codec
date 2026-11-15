@@ -18,7 +18,6 @@ from math import gcd
 import numpy as np
 from scipy.signal import resample_poly
 from _common import OUT, save_json
-from a2i import features as features_mod
 from a2i.codec import NS, decode
 from a2i.channel import transmit, snr
 from a2i.mdct import mdct, imdct
@@ -44,11 +43,7 @@ def through(x, rate):
     """The whole pipeline (Droplets look) for NS samples of mono audio at `rate`.
     Returns the prepared reference, the decode from the lossless image, and the decode after
     the simulated screenshot (q75, 0.15 px)."""
-    old = features_mod.FS; features_mod.FS = rate            # colour/shape features need the true rate
-    try:
-        rgb, Y, side, info, _ = render(x, DEFAULT_LOOK)
-    finally:
-        features_mod.FS = old
+    rgb, Y, side, info, _ = render(x, DEFAULT_LOOK, fs_in=rate, rate=rate)
     return info["x"], decode(rgb, side), decode(transmit(rgb, 75, True, 0.15), side)
 
 # ---------------------------------------------------------------- rebuilt highs
@@ -117,7 +112,8 @@ if __name__ == "__main__":
         print(f"{tag}: {r['energy_above_8k_dB']:.1f} dB of the energy is above 8 kHz; the left-right difference is {r['side_vs_mid_dB']:.1f} dB relative to the sum")
         # 1-3: mono at three sample rates (same image, shorter clip)
         dec16 = None
-        for label, rate in (("1_now_16k_mono", 16000), ("2_real_24k_mono", 24000), ("3_real_32k_mono", 32000)):
+        for label, rate in (("1_now_16k_mono", 16000), ("2_real_24k_mono", 24000), ("2b_real_25k6_mono", 25600),
+                            ("3_real_32k_mono", 32000)):
             ref, lo, sh = through(resample(mono, fs, rate)[:NS], rate)
             save(label, rate, ref, lo, sh, NS/rate)
             if rate == 16000:

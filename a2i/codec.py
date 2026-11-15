@@ -15,6 +15,7 @@ Format additions (adopted; every function default still reproduces the first for
   under   a luma pattern the decoder also knows (the contour ripple of a2i/shapes.py). It is
           added after modulation and subtracted before demodulation.
   dr      envelope range in log2 units. First format 9 (54 dB); adopted value 6 (36 dB).
+  fs      audio sample rate (a header field). The image holds NS samples whatever the rate.
 A side dict may hold `shape` (descriptor + ripple) instead of `cells`/`under`; decode() then
 rebuilds both from it, exactly as a decoder would from the header.
 """
@@ -79,12 +80,14 @@ def layout(name="raster"):
         return cells[::-1] if name == "spiral_in" else cells
     raise ValueError(name)
 
-def prepare(x, fs_in=FS):
+def prepare(x, fs_in=FS, fs=FS):
+    """fs: the audio rate carried by the image. The image always holds NS samples, so the clip
+    lasts NS/fs seconds: 16.128 s at 16 kHz, 8.064 s at 32 kHz."""
     x = np.asarray(x, float)
     if x.ndim == 2:
         x = x.mean(axis=1)
-    if fs_in != FS:
-        g = gcd(int(fs_in), FS); x = resample_poly(x, FS//g, int(fs_in)//g)
+    if fs_in != fs:
+        g = gcd(int(fs_in), int(fs)); x = resample_poly(x, int(fs)//g, int(fs_in)//g)
     x = np.pad(x[:NS], (0, max(0, NS - len(x))))
     pk = np.abs(x).max()
     return x / (pk * 1.02) if pk > 0 else x
@@ -163,15 +166,15 @@ def rasterize(P, under=None):
     return np.clip(Y, 0, 255), clip
 
 def encode_luma(x, fs_in=FS, cells=None, a_env=A_ENV, a_res=A_RES, grain=0.0,
-                centre=None, smooth=0.0, under=None, dr=DR):
-    x = prepare(x, fs_in)
+                centre=None, smooth=0.0, under=None, dr=DR, fs=FS):
+    x = prepare(x, fs_in, fs)
     W, gains = whiten(analyze(x))
     env, R, ref = normalize(pack(W), dr)
     # centre: whole grey levels, so that the header can carry the shift as one integer
     shift = 0.0 if centre is None else float(np.round(centre - 128.0 - a_env*np.median(env)))
     Y, clip = rasterize(modulate(env, R, cells, a_env, a_res, grain, shift, smooth), under)
     side = dict(gains=gains, ref=ref, cells=cells, a_env=a_env, a_res=a_res, grain=grain,
-                shift=shift, smooth=smooth, under=under, dr=dr)
+                shift=shift, smooth=smooth, under=under, dr=dr, fs=fs)
     return Y, side, dict(x=x, env=env, clip=clip)
 
 def luma(rgb):

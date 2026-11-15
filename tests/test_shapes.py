@@ -7,14 +7,18 @@ from PIL import Image
 from a2i import codec
 from a2i.channel import snr
 from a2i.features import features
-from a2i.shapes import RIPPLE, build, descriptor, layout_from
+from a2i.shapes import RIPPLE, build, descriptor, layout_from, weights
 from a2i.testsignals import PIECES, piece_a
 from explore_shapes import SHAPES, plate_modes, render_shape
 from render_options import render, DEFAULT_LOOK
 
 @pytest.fixture(scope="module")
 def descriptors():
-    return {pk: descriptor(features(codec.prepare(fn()))) for pk, fn in PIECES.items()}
+    out = {}
+    for pk, fn in PIECES.items():
+        ft = features(codec.prepare(fn()))
+        out[pk] = dict(descriptor(ft), stand=weights(ft), ft=ft)
+    return out
 
 def test_descriptor_is_fourteen_4bit_numbers(descriptors):
     for d in descriptors.values():
@@ -29,13 +33,25 @@ def test_every_shape_is_a_permutation(shape, descriptors):
         assert np.array_equal(np.sort(cells), np.arange(codec.NT))
         assert np.all(np.diff(keys) >= 0)
 
+def test_weights_are_twelve_4bit_numbers_and_only_notes_above_the_median_count(descriptors):
+    for d in descriptors.values():
+        w = d["stand"]
+        assert len(w) == 12 and all(isinstance(v, int) and 0 <= v <= 15 for v in w)
+        assert max(w) == 15 and sum(v == 0 for v in w) >= 6          # at or below the median -> 0
+
+def test_shape_does_not_depend_on_the_detected_key(descriptors):
+    ft = descriptors["A"]["ft"]
+    other = dict(ft, tonic=(ft["tonic"] + 3) % 12, mode="major")     # same notes, another key label
+    assert weights(other) == weights(ft)
+    assert descriptor(other)["w"] != descriptor(ft)["w"]             # the old description did depend on it
+
 def test_shape_depends_on_the_notes(descriptors):
-    a = build("droplets", descriptors["A"]["w"])[0]
-    c = build("droplets", descriptors["C"]["w"])[0]
+    a = build("droplets", descriptors["A"]["stand"])[0]
+    c = build("droplets", descriptors["C"]["stand"])[0]
     assert not np.array_equal(a, c)
 
 def test_ripple_has_the_adopted_amplitude(descriptors):
-    cells, under, tmap = build("droplets", descriptors["A"]["w"])
+    cells, under, tmap = build("droplets", descriptors["A"]["stand"])
     assert RIPPLE == 8.0 and abs(np.abs(under).max() - RIPPLE) < 0.01
     assert under.shape == tmap.shape == (codec.CANVAS, codec.CANVAS)
     assert tmap.min() >= 0 and tmap.max() <= codec.NT - 1
@@ -53,6 +69,7 @@ def test_default_look_decodes_from_header_sized_fields_only():
     spec = side["shape"]
     assert set(spec) == {"name", "w", "ripple"} and len(spec["w"]) == 12 and spec["ripple"] == RIPPLE
     assert side["shift"] == round(side["shift"]) and side["smooth"] == 1.0 and side["dr"] == 6.0
+    assert side["fs"] == 16000                                    # the synthetic pieces are 16 kHz signals
     assert snr(info["x"], codec.decode(Y, side)) >= 30.0          # float luma, no channel
     assert snr(info["x"], codec.decode(rgb, side)) >= 30.0        # lossless PNG
 

@@ -9,9 +9,12 @@ KK_MIN = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3
 NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
 HOP = 256
 
-def features(x):
-    f, _, Z = stft(x, FS, nperseg=4096, noverlap=4096-HOP)
-    S = np.abs(Z)                                   # (bins, frames); frame j ~ sample j*HOP
+def features(x, fs=FS):
+    """fs: sample rate of x. Window (256 ms) and hop (16 ms) are kept in time, and all band
+    limits are in Hz, so the features of the same music do not depend on the rate."""
+    hop = int(round(HOP*fs/FS))
+    f, _, Z = stft(x, fs, nperseg=16*hop, noverlap=15*hop)
+    S = np.abs(Z)                                   # (bins, frames); frame j ~ sample j*hop
     band = (f >= 55) & (f <= 4000)
     pc = (np.round(12*np.log2(f[band]/261.6256)) % 12).astype(int)
     chroma = np.zeros((12, S.shape[1]))
@@ -22,7 +25,7 @@ def features(x):
     _, tonic, mode = max(scores)
     lS = np.log1p(S[(f > 30) & (f < 7500)]*50)
     flux = np.maximum(0, np.diff(lS, axis=1)).sum(0); flux = np.r_[0, flux]
-    fr = FS/HOP; o = flux - flux.mean()
+    fr = fs/hop; o = flux - flux.mean()
     ac = np.correlate(o, o, "full")[len(o)-1:]
     lags = np.arange(int(fr*60/180), int(fr*60/60)+1)
     bpm = 60*fr/lags[np.argmax(ac[lags])]           # unreliable: octave errors, unused
@@ -34,7 +37,7 @@ def features(x):
     active = rms > rms.max()*0.02
     return dict(f=f, S=S, chroma=chroma, tonic=tonic, mode=mode, key=f"{NAMES[tonic]} {mode}",
                 bpm=float(bpm), flux=flux/(flux.max()+1e-9), centroid=centroid,
-                flatness=flatness, rms=rms,
+                flatness=flatness, rms=rms, hop=hop, fs=fs,
                 tonality=float(1 - np.median(flatness[active])),
                 brightness=float(np.median(centroid[active])))
 
@@ -47,6 +50,6 @@ def tonal_centroid(ft, rel, sigma_frames=10):
     z = (ch*np.exp(1j*ang)[:, None]).sum(0)/(ch.sum(0) + 1e-12)
     return (np.angle(z) - np.pi/4)/(2*np.pi), np.abs(z)
 
-def tile_frame(t):
-    """Tile t holds MDCT coefficients starting near sample 63*t."""
-    return (63*np.asarray(t))//HOP
+def tile_frame(t, hop=HOP):
+    """Tile t holds MDCT coefficients starting near sample 63*t; hop = STFT hop in samples."""
+    return (63*np.asarray(t))//hop

@@ -17,10 +17,10 @@ from render_options import render, LOOKS, ALL_LOOKS, DEFAULT_LOOK
 
 INK, PAPER = (30, 30, 30), (250, 250, 248)
 
-def write_wav(path, x):
+def write_wav(path, x, rate=FS):
     pcm = np.round(np.clip(x, -1, 1)*32767).astype("<i2")
     with wave.open(str(path), "wb") as w:
-        w.setnchannels(1); w.setsampwidth(2); w.setframerate(FS); w.writeframes(pcm.tobytes())
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(int(rate)); w.writeframes(pcm.tobytes())
 
 def sheet(path, cells, ncols, thumb, title=None, pad=14, label_h=34):
     """cells: list of (label, image array or None). Writes a labelled contact sheet."""
@@ -42,21 +42,22 @@ def grey(x, lay="raster", a_env=30, a_res=105, grain=0.0):
     Y, _, _ = encode_luma(x, cells=layout(lay), a_env=a_env, a_res=a_res, grain=grain)
     return np.round(Y).astype(np.uint8)
 
-def spectrogram_db(x):
-    f, t, Z = stft(x, FS, nperseg=512, noverlap=384)
+def spectrogram_db(x, rate=FS):
+    n = int(round(512*rate/FS))                              # 32 ms window at any rate
+    f, t, Z = stft(x, rate, nperseg=n, noverlap=3*n//4)
     return f, t, np.abs(Z)
 
-def degradation_figure(path, pk, x, decoded, title=None):
-    """decoded: list of (label, signal, snr dB). Original + 5 conditions, magma, 0-8 kHz."""
-    f, t, S0 = spectrogram_db(x); ref = S0.max()
-    panels = [("original (prepared: 16 kHz mono)", x, None)] + decoded
+def degradation_figure(path, pk, x, decoded, title=None, rate=FS):
+    """decoded: list of (label, signal, snr dB). Original + 5 conditions, magma, 0 Hz - rate/2."""
+    f, t, S0 = spectrogram_db(x, rate); ref = S0.max()
+    panels = [(f"original (prepared: {rate/1000:g} kHz mono)", x, None)] + decoded
     fig, axes = plt.subplots(2, 3, figsize=(15, 7.6), sharex=True, sharey=True, constrained_layout=True)
     for ax, (label, y, s) in zip(axes.ravel(), panels):
-        S = spectrogram_db(y)[2]
+        S = spectrogram_db(y, rate)[2]
         img = ax.imshow(20*np.log10(S/ref + 1e-9), origin="lower", aspect="auto", cmap="magma",
                         vmin=-80, vmax=0, extent=(t[0], t[-1], 0, f[-1]/1000), interpolation="nearest")
         ax.set_title(label if s is None else f"{label} - SNR {s:.1f} dB", fontsize=11, loc="left")
-        ax.set_ylim(0, 8)
+        ax.set_ylim(0, rate/2000)
         for sp in ax.spines.values():
             sp.set_visible(False)
         ax.tick_params(length=3, colors="#555555", labelsize=9)

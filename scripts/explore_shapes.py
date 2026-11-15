@@ -18,7 +18,7 @@ from a2i.codec import NT, SIDE
 from a2i.looks import colorize
 from a2i.features import features
 from a2i.channel import transmit, snr
-from a2i.shapes import TAU, RIPPLE, descriptor, tile_xy, angle, disc, droplets, layout_from, fields_from
+from a2i.shapes import TAU, RIPPLE, descriptor, weights, tile_xy, angle, disc, droplets, layout_from, fields_from
 from a2i.testsignals import PIECES, _note, FS, NS
 from render_options import palette, look_droplets, brightness_for, SMOOTH, ENV_RANGE
 from explore_aesthetics import chroma_radius, KEY
@@ -62,14 +62,14 @@ def shape_chladni(d, bands=34):
     Hs = np.sort(H(*tile_xy()))
     return lambda x, y: (bands*np.interp(H(x, y), Hs, np.arange(NT)/NT), angle(x, y))
 
-SHAPES = {"disc": lambda d: disc(), "droplets": lambda d: droplets(d["w"]),
+SHAPES = {"disc": lambda d: disc(), "droplets": lambda d: droplets(d["stand"]),
           "flower": shape_flower, "chladni": shape_chladni}
 
 
 # ---------------------------------------------------------------- render + measure
 def render_shape(x, shape, ripple=RIPPLE, auto=True, chroma_kw=None, **kw):
     """Like render_options.render_droplets, for any landscape in SHAPES."""
-    ft = features(codec.prepare(x)); pal = palette(ft); d = descriptor(ft)
+    ft = features(codec.prepare(x)); pal = palette(ft); d = dict(descriptor(ft), stand=weights(ft))
     cells, under, tmap = fields_from(SHAPES[shape](d), ripple)
     centre, sign = brightness_for(pal) if auto else (128.0, 1.0)
     cfg = dict(a_env=sign*60.0, a_res=75.0, centre=centre, smooth=SMOOTH, dr=ENV_RANGE); cfg.update(kw)

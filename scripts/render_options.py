@@ -6,7 +6,7 @@ from PIL import Image
 from scipy.ndimage import gaussian_filter, gaussian_filter1d, map_coordinates
 from _common import OUT, compare, save_json
 from a2i import shapes
-from a2i.codec import encode_luma, decode, layout, prepare, CANVAS, INNER, NT
+from a2i.codec import encode_luma, decode, layout, prepare, CANVAS, INNER, NT, FS
 from a2i.looks import colorize, hue_cbcr, tiles_to_canvas, lerp_hue, oklch_cbcr, best_luma
 from a2i.features import features, tile_frame, tonal_centroid
 from a2i.channel import transmit, snr
@@ -24,7 +24,7 @@ def palette(ft):
     return dict(h0=h0 % 1, h1=(h0 + sgn*spread) % 1, sgn=sgn, sat=sat, rel=rel)
 
 def per_tile(ft, pal):
-    j = np.clip(tile_frame(np.arange(NT)), 0, ft["S"].shape[1] - 1)
+    j = np.clip(tile_frame(np.arange(NT), ft["hop"]), 0, ft["S"].shape[1] - 1)
     L = 20*np.log10(ft["rms"] + 1e-9); Ln = np.clip((L - (L.max() - 42))/42, 0, 1)
     pc = ft["chroma"].argmax(0)
     d = (7*(pc - pal["rel"])) % 12; dsig = ((d + 6) % 12) - 6
@@ -82,7 +82,7 @@ def look_droplets(Y, ft, pal, cells, tmap, span=0.45, vivid=1.0, loud_shift=0.06
                loudness shift. span 0.45 keeps related colours around the key hue.
     vividness  how clearly tonal the moment is, times loudness. Perceptual (OKLCH) wheel."""
     t = per_tile(ft, pal)
-    j = np.clip(tile_frame(np.arange(NT)), 0, ft["S"].shape[1] - 1)
+    j = np.clip(tile_frame(np.arange(NT), ft["hop"]), 0, ft["S"].shape[1] - 1)
     turn, mag = tonal_centroid(ft, pal["rel"], tsig)
     loud = gaussian_filter1d(t["loud"], 6, mode="nearest")
     hue = pal["h0"] + span*turn[j] + pal["sgn"]*loud_shift*(loud - 0.5)
@@ -108,29 +108,34 @@ DEFAULT_LOOK = "Droplets"
 ALL_LOOKS = list(LOOKS) + [DEFAULT_LOOK]
 SMOOTH = 1.0                                # adopted envelope blend width (tiles)
 ENV_RANGE = 6.0                             # adopted envelope range: 6 log2 units = 36 dB
+RATE = 32000                                # adopted audio rate for real music (8.064 s per image)
 
 def render_droplets(x, a_env=A_ENV, a_res=A_RES, ripple=shapes.RIPPLE, shape="droplets",
-                    hue_brightness=True, chroma_kw=None, dr=ENV_RANGE, weights=None):
+                    hue_brightness=True, chroma_kw=None, dr=ENV_RANGE, weights=None,
+                    fs_in=FS, rate=FS):
     """The adopted look. The side dict holds only header-sized fields for the layout: the shape
-    name, the 12 pitch-class weights and the ripple amplitude; decode() rebuilds the rest."""
-    ft = features(prepare(x)); pal = palette(ft)
-    spec = dict(name=shape, w=shapes.descriptor(ft)["w"] if weights is None else weights(ft), ripple=ripple)
+    name, the 12 note weights and the ripple amplitude; decode() rebuilds the rest.
+    fs_in: sample rate of x. rate: audio rate carried by the image (the clip lasts NS/rate s)."""
+    ft = features(prepare(x, fs_in, rate), rate); pal = palette(ft)
+    spec = dict(name=shape, w=(shapes.weights if weights is None else weights)(ft), ripple=ripple)
     cells, under, tmap = shapes.build(**spec)
     centre, sign = brightness_for(pal) if hue_brightness else (128.0, 1.0)
-    Y, side, info = encode_luma(x, cells=cells, a_env=sign*a_env, a_res=a_res,
-                                centre=centre, smooth=SMOOTH, under=under, dr=dr)
+    Y, side, info = encode_luma(x, fs_in, cells=cells, a_env=sign*a_env, a_res=a_res,
+                                centre=centre, smooth=SMOOTH, under=under, dr=dr, fs=rate)
     side.update(cells=None, under=None, shape=spec)
     cb, cr = look_droplets(Y, ft, pal, cells, tmap, **(chroma_kw or {}))
     return colorize(Y, cb, cr), Y, side, info, ft
 
-def render(x, name, a_env=A_ENV, a_res=A_RES):
-    """Encode audio x with look `name`. Returns rgb (uint8), float luma Y, side, info, features."""
+def render(x, name, a_env=A_ENV, a_res=A_RES, fs_in=FS, rate=FS):
+    """Encode audio x with look `name`. Returns rgb (uint8), float luma Y, side, info, features.
+    fs_in: sample rate of x. rate: audio rate carried by the image (defaults: 16 kHz, as the
+    synthetic test pieces are 16 kHz signals; real music uses RATE)."""
     if name == DEFAULT_LOOK:
-        return render_droplets(x, a_env, a_res)
+        return render_droplets(x, a_env, a_res, fs_in=fs_in, rate=rate)
     lay, chroma_fn = LOOKS[name]
     cells = layout(lay)
-    Y, side, info = encode_luma(x, cells=cells, a_env=a_env, a_res=a_res)
-    ft = features(info["x"]); pal = palette(ft)
+    Y, side, info = encode_luma(x, fs_in, cells=cells, a_env=a_env, a_res=a_res, fs=rate)
+    ft = features(info["x"], rate); pal = palette(ft)
     cb, cr = chroma_fn(Y, ft, pal, cells)
     return colorize(Y, cb, cr), Y, side, info, ft
 

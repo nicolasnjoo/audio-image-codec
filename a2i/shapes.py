@@ -5,13 +5,13 @@ let time run along its contour lines: key = floor(h - angle) + angle, tiles sort
 The round spiral is the landscape "distance from the centre". Every ordering is a
 permutation, so the audio capacity does not change.
 
-Droplets: one drop per prominent pitch class, placed on a 12-hour clock (tonic at 12 o'clock,
-one hour per semitone), size = how much that note is used. The drops merge outwards. Time
+Droplets: one drop per note that stands out, placed on a fixed 12-hour clock (C at 12 o'clock,
+one hour per semitone), size = how far the note stands out. The drops merge outwards. Time
 starts on the outermost contour and ends inside the drops; all drops play the same moment.
 
-The only music-dependent input is the descriptor: 12 pitch-class weights, 4 bits each
-(6 bytes). `brightness` and `tonality` are also returned for the experimental shapes in
-scripts/shapes.py; droplets does not read them.
+The only music-dependent input is weights(): 12 integers, 4 bits each (6 bytes). The clock is
+fixed, so the shape does not depend on the key detector. descriptor() is the older, key-
+anchored description still used by the experimental shapes in scripts/explore_shapes.py.
 
 NOTE: the ordering uses float sort keys. It is deterministic on one machine; a bit-exact
 cross-platform format needs an integer definition (roadmap step 10).
@@ -24,8 +24,16 @@ TAU = 2*np.pi
 RIPPLE = 8.0            # adopted: amplitude (grey levels) of the light/dark wave along the contours
 
 
+def weights(ft):
+    """12 integers 0..15 in fixed pitch order (C first): how far each note rises above the
+    middle of the mix, (energy - median) / (strongest - median), 0 below the median."""
+    cm = ft["chroma"].sum(1)
+    med = np.median(cm)
+    return np.round(15*np.clip((cm - med)/(cm.max() - med + 1e-30), 0, 1)).astype(int).tolist()
+
 def descriptor(ft):
-    """12 pitch-class weights (tonic first), brightness, tonality: integers 0..15 each."""
+    """Experimental shapes only. 12 pitch-class weights (tonic first, sqrt of the energy
+    share), brightness, tonality: integers 0..15 each."""
     cm = np.roll(ft["chroma"].sum(1), -ft["tonic"])
     return dict(w=np.round(15*np.sqrt(cm/cm.max())).astype(int).tolist(),
                 bright=int(np.clip(round(15*(ft["brightness"] - 300)/2500), 0, 15)),
@@ -49,10 +57,11 @@ def angle(x, y):
 def disc(w=None):
     return lambda x, y: (np.hypot(x, y), angle(x, y))
 
-def droplets(w, ring=13.0, beta=0.45, most=6, floor=8):
-    """w: the 12 pitch-class weights (0..15). Drops for the `most` strongest notes with weight
-    >= floor, on a circle of radius `ring` tiles; drop radius 1.5 .. 6.5 tiles; the drops are
-    merged with a soft minimum (sharpness beta per tile). Angle = around the nearest drop."""
+def droplets(w, ring=13.0, beta=0.45, most=6, floor=3):
+    """w: 12 weights (0..15), see weights(). Drops for the `most` strongest notes with weight
+    >= floor (3 of 15 = 0.2), on a circle of radius `ring` tiles; drop radius 2.5 .. 6.5 tiles;
+    the drops are merged with a soft minimum (sharpness beta per tile). Angle = around the
+    nearest drop."""
     w = np.asarray(w)
     ks = [int(k) for k in np.argsort(-w, kind="stable")[:most] if w[k] >= floor]
     cx = np.array([ring*np.sin(TAU*k/12) for k in ks]); cy = np.array([-ring*np.cos(TAU*k/12) for k in ks])
