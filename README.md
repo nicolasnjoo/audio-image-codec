@@ -21,7 +21,6 @@ scripts/    check_baseline.py  levers.py  colour_test.py  render_options.py
             loss_budget.py  figures.py
 tests/      test_mdct.py  test_roundtrip.py  test_determinism.py  test_colorize.py
 out/        generated images, WAVs, JSON (git-ignored)
-src/codec/  earlier empty project skeleton, untouched
 ```
 
 Pipeline, one function per stage:
@@ -34,7 +33,7 @@ Pipeline, one function per stage:
 ```
 python -m venv .venv
 .venv/bin/pip install -r requirements.txt pytest
-.venv/bin/python -m pytest -q                  # 36 tests, ~30 s
+.venv/bin/python -m pytest -q                  # 35 tests, ~30 s
 
 .venv/bin/python scripts/check_baseline.py     # MDCT reconstruction + grey baseline
 .venv/bin/python scripts/levers.py             # layout / contrast / grain levers

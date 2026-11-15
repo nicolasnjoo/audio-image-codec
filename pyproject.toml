@@ -3,18 +3,15 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "codec"
-version = "0.0.1"
-description = "Audio ↔ Image reversible codec (constraint-aware)"
-requires-python = ">=3.11"
-dependencies = []
+name = "a2i"
+version = "0.1.0"
+description = "Audio <-> image codec: analog payload in luma, graceful degradation"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26", "scipy>=1.11", "pillow>=10.1", "matplotlib>=3.8"]
 
 [tool.setuptools]
-package-dir = {"" = "src"}
-
-[tool.setuptools.packages.find]
-where = ["src"]
+packages = ["a2i"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = [".", "src", "scripts"]
+pythonpath = [".", "scripts"]
