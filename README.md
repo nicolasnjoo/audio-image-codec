@@ -19,7 +19,9 @@ simulated as a sub-pixel shift.
 a2i/        mdct.py  codec.py  channel.py  looks.py  features.py  testsignals.py
 scripts/    check_baseline.py  levers.py  colour_test.py  render_options.py
             loss_budget.py  figures.py
+            explore_aesthetics.py  shapes.py   (experimental, not the format)
 tests/      test_mdct.py  test_roundtrip.py  test_determinism.py  test_colorize.py
+            test_explore.py  test_shapes.py
 out/        generated images, WAVs, JSON (git-ignored)
 ```
 
@@ -33,7 +35,7 @@ Pipeline, one function per stage:
 ```
 python -m venv .venv
 .venv/bin/pip install -r requirements.txt pytest
-.venv/bin/python -m pytest -q                  # 35 tests, ~30 s
+.venv/bin/python -m pytest -q                  # 47 tests, ~40 s
 
 .venv/bin/python scripts/check_baseline.py     # MDCT reconstruction + grey baseline
 .venv/bin/python scripts/levers.py             # layout / contrast / grain levers
@@ -79,6 +81,35 @@ Colour costs 0.06–0.20 dB after a screenshot (mean of the three pieces, per lo
 Piece B's 21 dB lossless ceiling is luma clipping (1.00 % of modules) on tonal material.
 The MDCT stage alone reconstructs to > 270 dB except for the final 64 samples (4 ms),
 which are not reconstructed because the last half-window frame is not carried.
+
+## Experimental aesthetics (not part of the format)
+
+`scripts/explore_aesthetics.py` and `scripts/shapes.py` test visual changes as optional
+parameters of an experimental encoder/decoder pair; `a2i/codec.py` is unchanged. Numbers are
+audio SNR in dB after the simulated screenshot (q75, 0.15 px), colour, mean of pieces A/B/C.
+Today's Record look is 16.48 dB with a delivered chroma radius of 34 (a pure primary is ~127).
+
+| Change | Effect on the image | SNR |
+|---|---|---|
+| Median tile at luma 128 (was 151–169) | Deeper colour, clipping 0.35 % → 0.11 % | 17.35 |
+| + smooth envelope (tile means kept, decoder subtracts it) | No 16 px luma blocks | 17.37 |
+| + round spiral layout | Rings instead of squares | 17.33 |
+| + colour drawn along the time path, hue follows the harmony | Round colour bands, chroma 45 | 17.32 |
+| + envelope range 36 dB (was 54 dB) | More contrast on beats | 17.16 |
+| + grain amplitude 62 (was 75) | Calmer texture, chroma 49 | 16.65 |
+| Contour ripple of ±14 grey levels (decoder subtracts it) | Shape visible on any music | −0.11 |
+
+Shapes from the music (`shapes.py`): a layout is an ordering of the 4096 tiles, so define a
+landscape over the image and let time run along its contour lines. The landscape is built from
+a 7-byte descriptor (12 pitch-class weights, brightness, tonality; 4 bits each). `flower`,
+`droplets` and `chladni` score 17.20, 17.17 and 16.88 dB with the ripple, against 17.07 dB for
+the disc. Not yet built: the header that would carry the descriptor, and an integer
+specification of the ordering (it uses float sort keys today).
+
+```
+.venv/bin/python scripts/explore_aesthetics.py   # lever table, step ladder, out/explore_*.png
+.venv/bin/python scripts/shapes.py               # shape generators, out/shapes_*.png
+```
 
 ## Palette wording
 
