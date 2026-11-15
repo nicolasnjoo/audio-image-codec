@@ -20,7 +20,7 @@ from a2i.features import features
 from a2i.channel import transmit, snr
 from a2i.shapes import TAU, RIPPLE, descriptor, tile_xy, angle, disc, droplets, layout_from, fields_from
 from a2i.testsignals import PIECES, _note, FS, NS
-from render_options import palette, look_droplets, brightness_for, SMOOTH
+from render_options import palette, look_droplets, brightness_for, SMOOTH, ENV_RANGE
 from explore_aesthetics import chroma_radius, KEY
 
 
@@ -72,7 +72,7 @@ def render_shape(x, shape, ripple=RIPPLE, auto=True, chroma_kw=None, **kw):
     ft = features(codec.prepare(x)); pal = palette(ft); d = descriptor(ft)
     cells, under, tmap = fields_from(SHAPES[shape](d), ripple)
     centre, sign = brightness_for(pal) if auto else (128.0, 1.0)
-    cfg = dict(a_env=sign*60.0, a_res=75.0, centre=centre, smooth=SMOOTH); cfg.update(kw)
+    cfg = dict(a_env=sign*60.0, a_res=75.0, centre=centre, smooth=SMOOTH, dr=ENV_RANGE); cfg.update(kw)
     Y, side, info = codec.encode_luma(x, cells=cells, under=under, **cfg)
     cb, cr = look_droplets(Y, ft, pal, cells, tmap, **(chroma_kw or {}))
     return colorize(Y, cb, cr), Y, side, info, d

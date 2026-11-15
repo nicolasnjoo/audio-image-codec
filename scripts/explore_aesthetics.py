@@ -4,7 +4,7 @@ Centred brightness, the smooth envelope and the decodable ripple were adopted an
 a2i/codec.py and a2i/shapes.py. This script keeps the measurements that led there, and the
 levers that were measured but NOT adopted:
 
-  dr       envelope range in log2 units (format: 9 = 54 dB)
+  dr       envelope range in log2 units (first format 9 = 54 dB; 6 = 36 dB was adopted later)
   nblk     whitening time blocks (format: 32)
   a_res    grain amplitude (format: 75)
   layout   any codec layout, "disc_in" (round spiral) or an explicit permutation
@@ -40,7 +40,7 @@ def get_layout(name):
     return disc_layout(True) if name == "disc_in" else codec.layout(name)
 
 
-# ---------------------------------------------------------------- format + the two unadopted constants
+# ---------------------------------------------------------------- format + variable whitening blocks
 @contextlib.contextmanager
 def _patched(**kw):
     old = {k: getattr(codec, k) for k in kw}
@@ -54,15 +54,15 @@ def _patched(**kw):
 
 def encode_x(x, layout="spiral_in", a_env=60.0, a_res=75.0, centre=None, dr=9.0, smooth=0.0,
              nblk=32, under=None):
-    """codec.encode_luma with the envelope range and the whitening blocks made variable."""
-    with _patched(DR=dr, NBLK=nblk):
+    """codec.encode_luma with the number of whitening time blocks made variable."""
+    with _patched(NBLK=nblk):
         Y, side, info = codec.encode_luma(x, cells=get_layout(layout), a_env=a_env, a_res=a_res,
-                                          centre=centre, smooth=smooth, under=under)
-    side.update(dr=dr, nblk=nblk)
+                                          centre=centre, smooth=smooth, under=under, dr=dr)
+    side.update(nblk=nblk)
     return Y, side, info
 
 def decode_x(Y, s):
-    with _patched(DR=s["dr"], NBLK=s["nblk"]):
+    with _patched(NBLK=s["nblk"]):
         return codec.decode(Y, s)
 
 
@@ -155,7 +155,7 @@ if __name__ == "__main__":
         ("3 + smooth envelope",            look_record, dict(layout="spiral_in", centre=128, smooth=1.0)),
         ("4 + round spiral",               look_record, dict(layout="disc_in", centre=128, smooth=1.0)),
         ("5 + round harmony colour",       look_rings,  dict(FREE)),
-        ("6 option: envelope 36 dB",       look_rings,  dict(FREE, dr=6.0)),
+        ("6 + envelope 36 dB (adopted)",   look_rings,  dict(FREE, dr=6.0)),
         ("7 option: grain 62 (was 75)",    look_rings,  dict(FREE, a_res=62.0)),
         ("8 option: loud = dark",          look_rings,  dict(FREE, a_env=-60.0)),
     ]

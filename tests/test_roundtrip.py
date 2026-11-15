@@ -119,3 +119,15 @@ def test_centre_puts_the_median_tile_on_the_requested_luma(xa):
         assert side["shift"] == round(side["shift"])            # one integer for the header
         assert abs(128 + a_env*np.median(info["env"]) + side["shift"] - centre) <= 0.5
         assert snr(info["x"], codec.decode(Y, side)) >= 30.0
+
+def test_envelope_range_is_a_parameter_and_defaults_to_the_first_format(xa):
+    C = codec.pack(codec.whiten(codec.analyze(codec.prepare(xa)))[0])
+    env9, R9, ref = codec.normalize(C)
+    env6, R6, _ = codec.normalize(C, 6.0)
+    assert codec.DR == 9.0 and np.array_equal(codec.normalize(C, 9.0)[0], env9)
+    inside = env6 > -1                                           # tiles within 36 dB of the loudest
+    assert np.allclose((1 - env6[inside])*6.0, (1 - env9[inside])*9.0)   # same level, wider swing
+    assert np.allclose(codec.denormalize(env6, R6, ref, 6.0), C, rtol=1e-9, atol=1e-12)
+    Y, side, info = codec.encode_luma(xa, cells=codec.layout("raster"), a_env=60, a_res=75,
+                                      centre=128, smooth=1.0, dr=6.0)
+    assert side["dr"] == 6.0 and snr(info["x"], codec.decode(Y, side)) >= 30.0

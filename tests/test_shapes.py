@@ -52,7 +52,7 @@ def test_default_look_decodes_from_header_sized_fields_only():
     assert side["cells"] is None and side["under"] is None
     spec = side["shape"]
     assert set(spec) == {"name", "w", "ripple"} and len(spec["w"]) == 12 and spec["ripple"] == RIPPLE
-    assert side["shift"] == round(side["shift"]) and side["smooth"] == 1.0
+    assert side["shift"] == round(side["shift"]) and side["smooth"] == 1.0 and side["dr"] == 6.0
     assert snr(info["x"], codec.decode(Y, side)) >= 30.0          # float luma, no channel
     assert snr(info["x"], codec.decode(rgb, side)) >= 30.0        # lossless PNG
 

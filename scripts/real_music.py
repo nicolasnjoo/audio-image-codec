@@ -23,7 +23,7 @@ from a2i.channel import transmit, CONDITIONS, snr, segsnr
 from a2i.shapes import descriptor
 from render_options import render, render_droplets, DEFAULT_LOOK
 from loss_budget import STAGES
-from explore_aesthetics import _patched, chroma_radius, KEY
+from explore_aesthetics import chroma_radius, KEY
 from figures import sheet, write_wav, degradation_figure
 
 REAL = OUT / "real"
@@ -72,9 +72,8 @@ if __name__ == "__main__":
             d = descriptor(ft)
             rgb_r, Y_r, side_r, info_r, _ = render(x, "Record")
             old, old_seg = stages(rgb_r, Y_r, side_r, info_r["x"])
-            with _patched(DR=6.0):                                   # option: envelope range 36 dB
-                rgb6, _, side6, info6, _ = render_droplets(x)
-                dr6 = key3(rgb6, side6, info6["x"])
+            rgb9, _, side9, info9, _ = render_droplets(x, dr=9.0)    # the first format's range, 54 dB
+            dr9 = key3(rgb9, side9, info9["x"])
             rgb14, _, side14, info14, _ = render_droplets(x, ripple=14.0)
             rip14 = key3(rgb14, side14, info14["x"])
             res[clip_id] = dict(
@@ -84,7 +83,7 @@ if __name__ == "__main__":
                 droplets=new, droplets_segsnr=new_seg, droplets_clip=100*info["clip"],
                 droplets_chroma=chroma_radius(rgb),
                 record=old, record_segsnr=old_seg, record_clip=100*info_r["clip"],
-                record_chroma=chroma_radius(rgb_r), envelope_36dB=dr6, ripple_14=rip14)
+                record_chroma=chroma_radius(rgb_r), envelope_54dB=dr9, ripple_14=rip14)
             Image.fromarray(rgb).save(REAL / f"{clip_id}_{DEFAULT_LOOK}.png")
             Image.fromarray(rgb_r).save(REAL / f"{clip_id}_Record.png")
             write_wav(REAL / "wav" / f"{clip_id}_0_original.wav", xr)
@@ -121,7 +120,7 @@ if __name__ == "__main__":
           ", ".join(f"{s} {v:+.2f}" for s, v in zip(short, (n - o).mean(0))))
     k3 = ["lossless", "shot 0.15", "worst"]
     base = n[:, [1, 4, 6]]
-    for label, field in (("envelope range 36 dB", "envelope_36dB"), ("ripple 14", "ripple_14")):
+    for label, field in (("envelope range 54 dB", "envelope_54dB"), ("ripple 14", "ripple_14")):
         v = np.array([res[c][field] for c in ids])
         print(f"Option {label} minus default, mean (dB): " + ", ".join(f"{s} {d:+.2f}" for s, d in zip(k3, (v - base).mean(0)))
               + "; worst single clip at shot 0.15: " + f"{(v - base)[:, 1].min():+.2f}")

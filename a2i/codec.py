@@ -14,6 +14,7 @@ Format additions (adopted; every function default still reproduces the first for
           before reading the AC slots. Adopted value 1.0.
   under   a luma pattern the decoder also knows (the contour ripple of a2i/shapes.py). It is
           added after modulation and subtracted before demodulation.
+  dr      envelope range in log2 units. First format 9 (54 dB); adopted value 6 (36 dB).
 A side dict may hold `shape` (descriptor + ripple) instead of `cells`/`under`; decode() then
 rebuilds both from it, exactly as a decoder would from the header.
 """
@@ -101,11 +102,12 @@ def whiten(X):
 def pack(W):
     return W.reshape(-1)[:NT*AC].reshape(NT, AC)
 
-def normalize(C):
+def normalize(C, dr=DR):
+    """dr: envelope range in log2 units (6.02 dB each) below the loudest tile."""
     lp = np.log2(np.abs(C).max(1) + 1e-12)
     ref = lp.max()
-    lp = np.clip(lp, ref - DR, ref)
-    env = 2*(lp - (ref - DR))/DR - 1
+    lp = np.clip(lp, ref - dr, ref)
+    env = 2*(lp - (ref - dr))/dr - 1
     R = np.clip(C / (2.0**lp)[:, None], -1, 1)
     return env, R, float(ref)
 
@@ -161,15 +163,15 @@ def rasterize(P, under=None):
     return np.clip(Y, 0, 255), clip
 
 def encode_luma(x, fs_in=FS, cells=None, a_env=A_ENV, a_res=A_RES, grain=0.0,
-                centre=None, smooth=0.0, under=None):
+                centre=None, smooth=0.0, under=None, dr=DR):
     x = prepare(x, fs_in)
     W, gains = whiten(analyze(x))
-    env, R, ref = normalize(pack(W))
+    env, R, ref = normalize(pack(W), dr)
     # centre: whole grey levels, so that the header can carry the shift as one integer
     shift = 0.0 if centre is None else float(np.round(centre - 128.0 - a_env*np.median(env)))
     Y, clip = rasterize(modulate(env, R, cells, a_env, a_res, grain, shift, smooth), under)
     side = dict(gains=gains, ref=ref, cells=cells, a_env=a_env, a_res=a_res, grain=grain,
-                shift=shift, smooth=smooth, under=under)
+                shift=shift, smooth=smooth, under=under, dr=dr)
     return Y, side, dict(x=x, env=env, clip=clip)
 
 def luma(rgb):
@@ -195,8 +197,8 @@ def demodulate(Y, cells=None, a_env=A_ENV, a_res=A_RES, grain=0.0, shift=0.0, sm
     R = np.clip(V[:, _ZR, _ZC] / a_res / (g[:, None] if np.ndim(g) else g), -1, 1)
     return env, R
 
-def denormalize(env, R, ref):
-    lp = (env + 1)/2*DR + (ref - DR)
+def denormalize(env, R, ref, dr=DR):
+    lp = (env + 1)/2*dr + (ref - dr)
     return R * (2.0**lp)[:, None]
 
 def unpack(C):
@@ -216,4 +218,4 @@ def decode(img, side):
         cells, under = build(**side["shape"])[:2]
     env, R = demodulate(luma(img), cells, side["a_env"], side["a_res"], side["grain"],
                         side.get("shift", 0.0), side.get("smooth", 0.0), under)
-    return synthesize(unwhiten(unpack(denormalize(env, R, side["ref"])), side["gains"]))
+    return synthesize(unwhiten(unpack(denormalize(env, R, side["ref"], side.get("dr", DR))), side["gains"]))

@@ -107,17 +107,18 @@ LOOKS = {
 DEFAULT_LOOK = "Droplets"
 ALL_LOOKS = list(LOOKS) + [DEFAULT_LOOK]
 SMOOTH = 1.0                                # adopted envelope blend width (tiles)
+ENV_RANGE = 6.0                             # adopted envelope range: 6 log2 units = 36 dB
 
 def render_droplets(x, a_env=A_ENV, a_res=A_RES, ripple=shapes.RIPPLE, shape="droplets",
-                    hue_brightness=True, chroma_kw=None):
+                    hue_brightness=True, chroma_kw=None, dr=ENV_RANGE, weights=None):
     """The adopted look. The side dict holds only header-sized fields for the layout: the shape
     name, the 12 pitch-class weights and the ripple amplitude; decode() rebuilds the rest."""
     ft = features(prepare(x)); pal = palette(ft)
-    spec = dict(name=shape, w=shapes.descriptor(ft)["w"], ripple=ripple)
+    spec = dict(name=shape, w=shapes.descriptor(ft)["w"] if weights is None else weights(ft), ripple=ripple)
     cells, under, tmap = shapes.build(**spec)
     centre, sign = brightness_for(pal) if hue_brightness else (128.0, 1.0)
     Y, side, info = encode_luma(x, cells=cells, a_env=sign*a_env, a_res=a_res,
-                                centre=centre, smooth=SMOOTH, under=under)
+                                centre=centre, smooth=SMOOTH, under=under, dr=dr)
     side.update(cells=None, under=None, shape=spec)
     cb, cr = look_droplets(Y, ft, pal, cells, tmap, **(chroma_kw or {}))
     return colorize(Y, cb, cr), Y, side, info, ft
