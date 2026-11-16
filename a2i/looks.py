@@ -1,7 +1,8 @@
 """Chroma carries no data; colorize() guarantees luma is untouched."""
 import numpy as np
-from scipy.ndimage import gaussian_filter, minimum_filter, uniform_filter
+from scipy.ndimage import gaussian_filter, gaussian_filter1d, minimum_filter, uniform_filter
 from .codec import CANVAS, INNER, ORIGIN, SIDE, T, BMOD, NT
+from .features import tile_frame, tonal_centroid
 
 _K = np.array([[0.0, 1.402], [-0.344136, -0.714136], [1.772, 0.0]])   # (Cb, Cr) -> dR, dG, dB
 _W = np.array([0.299, 0.587, 0.114])
@@ -77,3 +78,48 @@ def best_luma(cb, cr, head=16.0):
     ys = np.arange(40, 216)
     room = [min(((255 - head - y)/v if v > 0 else (y - head)/-v) for v in d if abs(v) > 1e-9) for y in ys]
     return int(ys[int(np.argmax(room))])
+
+
+# ---------------------------------------------------------------- palette and the Droplets look
+def palette(ft):
+    rel = (ft["tonic"] + (3 if ft["mode"] == "minor" else 0)) % 12
+    h0 = ((7*rel) % 12)/12 + 0.04
+    sgn = 1 if ft["mode"] == "major" else -1
+    spread = 0.10 + 0.12*np.clip((ft["brightness"] - 400)/2600, 0, 1)
+    sat = float(np.clip(0.45 + 0.55*ft["tonality"], 0.45, 1.0))
+    return dict(h0=h0 % 1, h1=(h0 + sgn*spread) % 1, sgn=sgn, sat=sat, rel=rel)
+
+
+def per_tile(ft, pal, j=None):
+    """j: STFT frame of every tile (default: tile t starts near sample 63*t)."""
+    j = tile_frame(np.arange(NT), ft["hop"]) if j is None else j
+    j = np.clip(j, 0, ft["S"].shape[1] - 1)
+    L = 20*np.log10(ft["rms"] + 1e-9); Ln = np.clip((L - (L.max() - 42))/42, 0, 1)
+    pc = ft["chroma"].argmax(0)
+    d = (7*(pc - pal["rel"])) % 12; dsig = ((d + 6) % 12) - 6
+    return dict(loud=Ln[j], dist=dsig[j], onset=ft["flux"][j])
+
+
+def look_droplets(Y, ft, pal, cells, tmap, span=0.45, vivid=1.0, loud_shift=0.06, blur=5.0, tsig=10, j=None):
+    """Colour that follows the time path continuously, so it has no 16 px steps.
+    tmap       tile-time of every canvas pixel (from a2i.shapes)
+    hue        key hue + span * harmony (tonal centroid on the circle of fifths) + a small
+               loudness shift. span 0.45 keeps related colours around the key hue.
+    vividness  how clearly tonal the moment is, times loudness. Perceptual (OKLCH) wheel."""
+    j = tile_frame(np.arange(NT), ft["hop"]) if j is None else j
+    j = np.clip(j, 0, ft["S"].shape[1] - 1)
+    t = per_tile(ft, pal, j)
+    turn, mag = tonal_centroid(ft, pal["rel"], tsig)
+    loud = gaussian_filter1d(t["loud"], 6, mode="nearest")
+    hue = pal["h0"] + span*turn[j] + pal["sgn"]*loud_shift*(loud - 0.5)
+    v = vivid*(0.45 + 0.55*np.clip(mag[j]/0.64, 0, 1))*(0.4 + 0.6*loud)
+    cb_t, cr_t = oklch_cbcr(0.62, 0.03 + 0.17*v, hue)
+    return (gaussian_filter(np.interp(tmap, np.arange(NT), cb_t), blur),
+            gaussian_filter(np.interp(tmap, np.arange(NT), cr_t), blur))
+
+def brightness_for(pal):
+    """Encoder policy (not a decoder constant): the median tile is drawn at the luma where the
+    key hue has the most room, limited to 128..165. When it is raised, loud moments are drawn
+    dark (negative A_ENV) so that they move towards mid grey instead of clipping."""
+    centre = float(np.clip(best_luma(*oklch_cbcr(0.62, 0.15, pal["h0"])), 128, 165))
+    return centre, (-1.0 if centre > 128 else 1.0)

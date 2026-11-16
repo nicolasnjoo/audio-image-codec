@@ -13,8 +13,10 @@ The only music-dependent input is weights(): 12 integers, 4 bits each (6 bytes).
 fixed, so the shape does not depend on the key detector. descriptor() is the older, key-
 anchored description still used by the experimental shapes in scripts/explore_shapes.py.
 
-NOTE: the ordering uses float sort keys. It is deterministic on one machine; a bit-exact
-cross-platform format needs an integer definition (roadmap step 10).
+NOTE: the landscape is computed in floating point and its sort keys are rounded to 1/65536
+of a contour before sorting, so two implementations agree unless a key falls within their
+rounding difference of a step. A guaranteed bit-exact format still needs an integer
+definition of the landscape itself (roadmap step 10).
 """
 from functools import lru_cache
 import numpy as np
@@ -80,14 +82,16 @@ LANDSCAPES = {"disc": disc, "droplets": droplets}
 
 
 # ---------------------------------------------------------------- landscape -> layout, ripple, time map
+KEY_STEPS = 65536       # sort keys are compared as integers: 1/65536 of a contour
+
 def spiral_key(h, th):
     return np.floor(h - th) + th
 
 def layout_from(f):
     """cells[t] = grid cell of tile t (a permutation); also the sorted keys."""
-    key = spiral_key(*f(*tile_xy()))
-    order = np.lexsort((np.arange(NT), key))
-    return order[::-1].copy(), key[order]
+    key = np.round(spiral_key(*f(*tile_xy()))*KEY_STEPS)             # integer keys
+    order = np.lexsort((np.arange(NT), key))                         # ties by cell index
+    return order[::-1].copy(), key[order]/KEY_STEPS
 
 def fields_from(f, ripple=0.0):
     """cells, under, tmap for a landscape f.

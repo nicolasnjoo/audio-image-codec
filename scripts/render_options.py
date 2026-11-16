@@ -3,32 +3,18 @@ The four original looks use the first format. Droplets (the adopted default) use
 additions: centred brightness, smooth envelope, a layout generated from the notes, ripple."""
 import json, numpy as np
 from PIL import Image
-from scipy.ndimage import gaussian_filter, gaussian_filter1d, map_coordinates
+from scipy.ndimage import gaussian_filter, map_coordinates
 from _common import OUT, compare, save_json
 from a2i import shapes
 from a2i.codec import encode_luma, decode, layout, prepare, CANVAS, INNER, NT, FS
-from a2i.looks import colorize, hue_cbcr, tiles_to_canvas, lerp_hue, oklch_cbcr, best_luma
-from a2i.features import features, tile_frame, tonal_centroid
+from a2i.looks import (colorize, hue_cbcr, tiles_to_canvas, lerp_hue, palette, per_tile,
+                       look_droplets, brightness_for)
+from a2i.features import features, tile_frame
 from a2i.channel import transmit, snr
 from a2i.testsignals import PIECES
 
 A_ENV, A_RES = 60, 75
 KEY = [("lossless", None, False, 0.0), ("screenshot", 75, True, 0.15), ("worst", 60, True, 0.5)]
-
-def palette(ft):
-    rel = (ft["tonic"] + (3 if ft["mode"] == "minor" else 0)) % 12
-    h0 = ((7*rel) % 12)/12 + 0.04
-    sgn = 1 if ft["mode"] == "major" else -1
-    spread = 0.10 + 0.12*np.clip((ft["brightness"] - 400)/2600, 0, 1)
-    sat = float(np.clip(0.45 + 0.55*ft["tonality"], 0.45, 1.0))
-    return dict(h0=h0 % 1, h1=(h0 + sgn*spread) % 1, sgn=sgn, sat=sat, rel=rel)
-
-def per_tile(ft, pal):
-    j = np.clip(tile_frame(np.arange(NT), ft["hop"]), 0, ft["S"].shape[1] - 1)
-    L = 20*np.log10(ft["rms"] + 1e-9); Ln = np.clip((L - (L.max() - 42))/42, 0, 1)
-    pc = ft["chroma"].argmax(0)
-    d = (7*(pc - pal["rel"])) % 12; dsig = ((d + 6) % 12) - 6
-    return dict(loud=Ln[j], dist=dsig[j], onset=ft["flux"][j])
 
 def border_fill(pal, r=28):
     return hue_cbcr(pal["h0"], r*pal["sat"])
@@ -74,29 +60,6 @@ def look_poster(Y, ft, pal, cells):
     hue = lerp_hue(pal["h0"], pal["h1"], diag) + 0.05*(glow - 0.5)
     rad = 70*pal["sat"]*(0.35 + 0.65*glow)
     return hue_cbcr(hue, rad)
-
-def look_droplets(Y, ft, pal, cells, tmap, span=0.45, vivid=1.0, loud_shift=0.06, blur=5.0, tsig=10):
-    """Colour that follows the time path continuously, so it has no 16 px steps.
-    tmap       tile-time of every canvas pixel (from a2i.shapes)
-    hue        key hue + span * harmony (tonal centroid on the circle of fifths) + a small
-               loudness shift. span 0.45 keeps related colours around the key hue.
-    vividness  how clearly tonal the moment is, times loudness. Perceptual (OKLCH) wheel."""
-    t = per_tile(ft, pal)
-    j = np.clip(tile_frame(np.arange(NT), ft["hop"]), 0, ft["S"].shape[1] - 1)
-    turn, mag = tonal_centroid(ft, pal["rel"], tsig)
-    loud = gaussian_filter1d(t["loud"], 6, mode="nearest")
-    hue = pal["h0"] + span*turn[j] + pal["sgn"]*loud_shift*(loud - 0.5)
-    v = vivid*(0.45 + 0.55*np.clip(mag[j]/0.64, 0, 1))*(0.4 + 0.6*loud)
-    cb_t, cr_t = oklch_cbcr(0.62, 0.03 + 0.17*v, hue)
-    return (gaussian_filter(np.interp(tmap, np.arange(NT), cb_t), blur),
-            gaussian_filter(np.interp(tmap, np.arange(NT), cr_t), blur))
-
-def brightness_for(pal):
-    """Encoder policy (not a decoder constant): the median tile is drawn at the luma where the
-    key hue has the most room, limited to 128..165. When it is raised, loud moments are drawn
-    dark (negative A_ENV) so that they move towards mid grey instead of clipping."""
-    centre = float(np.clip(best_luma(*oklch_cbcr(0.62, 0.15, pal["h0"])), 128, 165))
-    return centre, (-1.0 if centre > 128 else 1.0)
 
 LOOKS = {
     "Record":  ("spiral_in", look_record),
