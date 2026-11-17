@@ -10,7 +10,10 @@ def test_docs_is_the_current_build_of_web():
         assert path.exists(), f"docs/{name} is missing: run python scripts/build_site.py"
         assert path.read_text() == text, f"docs/{name} is stale: run python scripts/build_site.py"
 
-def test_the_page_is_a_complete_document():
+def test_the_page_is_one_complete_self_contained_document():
     html = outputs()["index.html"]
     assert html.startswith("<!doctype html>") and "<title>a2i Playground</title>" in html.split("</head>")[0]
     assert html.count("<body>") == 1 and html.rstrip().endswith("</html>")
+    assert 'id="codec-src"' in html and "function decodeCanonical" in html and "self.onmessage" in html
+    assert "importScripts" not in html and 'src="a2i.js"' not in html       # nothing else to fetch for the codec
+    assert sorted(p.name for p in (ROOT / "docs").iterdir()) == [".nojekyll", "index.html"]

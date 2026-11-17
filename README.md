@@ -21,7 +21,7 @@ are what most measurements below use.
 a2i/        mdct.py  codec.py  shapes.py  container.py  channel.py  looks.py  features.py
             testsignals.py
 web/        a2i.js  worker.js  index.html   (the same codec in the browser, and the test page)
-docs/       the test page as a complete web page, built from web/ and served by GitHub Pages
+docs/       the test page as one self-contained web page, built from web/, served by GitHub Pages
 scripts/    check_baseline.py  levers.py  colour_test.py  render_options.py
             loss_budget.py  figures.py  real_music.py  container_test.py
             web_check.py  web_node.js  build_site.py
@@ -215,8 +215,9 @@ soon as the channel added noise, because a small gain error becomes a noise floo
 switched on for this repository (Settings → Pages → Source "Deploy from a branch" → branch
 `claude/new-session-v6xt77`, folder `/docs`). It runs entirely in the browser: choose a sound
 file, make a picture, save it, then choose the picture or a screenshot of it to hear it back.
-`docs/` is generated; after changing anything in `web/`, run `python scripts/build_site.py`
-(a test fails when `docs/` is out of date).
+`docs/index.html` is a single self-contained file (the codec is embedded), so it also works
+when it is downloaded and opened directly. It is generated: after changing anything in
+`web/`, run `python scripts/build_site.py` (a test fails when `docs/` is out of date).
 
 `web/a2i.js` is the same codec in JavaScript, with no dependencies; `web/worker.js` runs it
 off the main thread and `web/index.html` is the test page (page content for the published

@@ -178,7 +178,8 @@ footer { margin-top: 22px; color: var(--muted); font-size: 13px; max-width: 75ch
   let worker = null, nextId = 1; const pending = new Map();
   function call(msg, transfer, onProgress) {
     if (!worker) {
-      worker = new Worker("worker.js");
+      const inline = document.getElementById("codec-src");   // the single-file build carries the codec in the page
+      worker = inline ? new Worker(URL.createObjectURL(new Blob([inline.textContent], { type: "text/javascript" }))) : new Worker("worker.js");
       worker.onmessage = (e) => {
         const p = pending.get(e.data.id); if (!p) return;
         if (e.data.progress) { p.onProgress && p.onProgress(e.data.progress); return; }
