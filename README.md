@@ -9,20 +9,25 @@ The payload is analog. MDCT coefficients are written directly as luma amplitudes
 coder or error correction on the payload. Colour carries no data and is free for styling.
 No ML, no third-party audio codec.
 
-Status: Python prototype. `frame` (finder patterns + header) and `register` (alignment)
-are not built yet; side information is still passed out of band and alignment error is
-simulated as a sub-pixel shift. The default look is **Droplets**.
+Status: Python prototype plus a browser version. The default look is **Droplets**, carrying
+8.064 s of 32 kHz mono. A first, provisional self-contained image exists
+(`a2i/container.py`): the picture carries its own header and can be found and aligned
+inside a screenshot. The older functions with out-of-band side information still work and
+are what most measurements below use.
 
 ## Layout
 
 ```
-a2i/        mdct.py  codec.py  shapes.py  channel.py  looks.py  features.py  testsignals.py
+a2i/        mdct.py  codec.py  shapes.py  container.py  channel.py  looks.py  features.py
+            testsignals.py
+web/        a2i.js  worker.js  index.html   (the same codec in the browser, and the test page)
 scripts/    check_baseline.py  levers.py  colour_test.py  render_options.py
-            loss_budget.py  figures.py  real_music.py
+            loss_budget.py  figures.py  real_music.py  container_test.py
+            web_check.py  web_node.js
             explore_aesthetics.py  explore_shapes.py
             explore_quality.py  explore_fine_layer.py   (experimental, not the format)
 tests/      test_mdct.py  test_roundtrip.py  test_determinism.py  test_colorize.py
-            test_explore.py  test_shapes.py  test_rate.py
+            test_explore.py  test_shapes.py  test_rate.py  test_container.py  test_web.py
 out/        generated images, WAVs, JSON (git-ignored)
 ```
 
@@ -36,7 +41,7 @@ Pipeline, one function per stage:
 ```
 python -m venv .venv
 .venv/bin/pip install -r requirements.txt pytest
-.venv/bin/python -m pytest -q                  # 60 tests, ~45 s
+.venv/bin/python -m pytest -q                  # 71 tests, ~50 s (three need Node.js)
 
 .venv/bin/python scripts/check_baseline.py     # MDCT reconstruction + grey baseline
 .venv/bin/python scripts/levers.py             # layout / contrast / grain levers
@@ -168,14 +173,59 @@ Shape on real music: with the adopted note weights the number of drops went from
 per image on average, excerpts of the same song share their main drops, and the audio is
 unchanged within the usual layout variation (16.96 → 16.92 dB after a screenshot).
 
-## Clip length against bandwidth (open decision)
+## Self-contained image and alignment (provisional, version 1)
 
-The image holds 258 048 samples. 32 kHz therefore gives 8.06 s, which is below the 10 s
-minimum. Ways to reconcile the two, twelve real excerpts, SNR after the simulated screenshot:
+`a2i/container.py` puts everything the decoder needs into the picture and finds the picture
+in any upright image of it. It is a first version, built so that real screenshots can be
+tested; it has not been agreed as the format.
+
+| Part | How |
+|---|---|
+| Finders | Four QR-style squares (7 × 7 modules of 4 px) in the corners of the 28 px border |
+| Ring | 4032 black/white cells of 4 × 4 px around the data square |
+| Header | Version, sample rate, polarity, 12 note weights, CRC-8: 64 bits, 6 copies around the ring |
+| Gains | The 512 whitening gains in 3 dB steps (5 bits each) plus CRC-16, 1.4 copies. The encoder whitens with the same quantised gains, so both sides use identical values |
+| Level | Not carried: the decoder returns audio normalised to its peak, and quality is measured with a best-fit level |
+| Alignment | Row and column scans for the finders, sub-pixel centres from their edges, offset and scale per axis, Lanczos resampling to 1080 × 1080 |
+
+Twelve real excerpts at 32 kHz, decoded from the picture alone (`scripts/container_test.py`):
+
+| Input | Mean SNR | Minimum |
+|---|---|---|
+| The image file (PNG) | 37.4 dB | 28.1 dB |
+| The image file re-saved as JPEG q85 | 23.4 dB | 22.2 dB |
+| Screenshot on a 1179 px wide phone, PNG | 28.2 dB | 24.7 dB |
+| The same screenshot sent as JPEG q75 | 20.1 dB | 19.0 dB |
+| The same screenshot sent as JPEG q60 | 17.0 dB | 16.3 dB |
+| Screenshot where the viewer scaled bilinearly, PNG | 18.1 dB | 17.9 dB |
+
+The ring was read without error in 72 of 72 decodes. On a 1080 px wide phone a screenshot of
+the picture shown at full size is an exact copy (same result as the file). Alignment error
+was 0.03–0.07 px RMS over the image (target 0.15 px), scale error at most 0.016 %. These are
+simulated screenshots; no real phone screenshot has been measured yet.
+
+Carrying the gains as analog values in reserved tiles was tried first and cost 2–3 dB as
+soon as the channel added noise, because a small gain error becomes a noise floor.
+
+## Browser version and test page
+
+`web/a2i.js` is the same codec in JavaScript, with no dependencies; `web/worker.js` runs it
+off the main thread and `web/index.html` is the test page (page content for the published
+page, without an `<html>` wrapper). `scripts/web_check.py` runs the JavaScript under Node and
+compares it with Python: on twelve real excerpts and the three synthetic pieces the two make
+the same picture (luma equal to within one grey level) and each decodes the other's pictures
+with the same SNR to two decimals. The browser's own sample-rate conversion differs from
+scipy's, so a picture made in a browser from a 44.1 or 48 kHz file is not bit-identical to
+one made in Python from the same file.
+
+## Clip length against bandwidth (decided: square 1080, 32 kHz, 8.06 s)
+
+The image holds 258 048 samples, so 32 kHz gives 8.06 s. The alternatives that were measured,
+twelve real excerpts, SNR after the simulated screenshot:
 
 | Option | Clip | Real band | Screenshot SNR | Changes |
 |---|---|---|---|---|
-| Square 1080, 32 kHz | 8.06 s | 16 kHz | 17.0 dB | nothing; below the 10 s minimum |
+| Square 1080, 32 kHz (chosen) | 8.06 s | 16 kHz | 17.0 dB | nothing |
 | Square 1080, 25.6 kHz | 10.08 s | 12.8 kHz | 17.0 dB | nothing |
 | Portrait 1080 × 1350, 32 kHz | 10.08 s | 16 kHz | same module size and scaling as today, so no change expected; not built | the image is no longer square |
 | Square 1208, 32 kHz | 10.2 s | 16 kHz | 16.6 dB on a 1179 px wide phone, 15.8 dB on a 1080 px wide phone (measured by drawing today's image smaller) | the image is no longer 1080 px |

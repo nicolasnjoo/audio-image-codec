@@ -13,9 +13,11 @@ The only music-dependent input is weights(): 12 integers, 4 bits each (6 bytes).
 fixed, so the shape does not depend on the key detector. descriptor() is the older, key-
 anchored description still used by the experimental shapes in scripts/explore_shapes.py.
 
-NOTE: the landscape is computed in floating point and its sort keys are rounded to 1/65536
-of a contour before sorting, so two implementations agree unless a key falls within their
-rounding difference of a step. A guaranteed bit-exact format still needs an integer
+NOTE: the landscape is computed in floating point. Its three discontinuous decisions are
+made tolerant so that two implementations agree: the nearest drop (ties within 1e-9 go to the
+first drop), the contour number (floor with a 1e-9 margin) and the sort (keys rounded to
+1/65536 of a contour, ties by cell index). Symmetric drop layouts otherwise put whole lines of
+tiles exactly on a tie, and Python and JavaScript then disagreed on 173 tiles of one clip. A guaranteed bit-exact format still needs an integer
 definition of the landscape itself (roadmap step 10).
 """
 from functools import lru_cache
@@ -66,11 +68,13 @@ def droplets(w, ring=13.0, beta=0.45, most=6, floor=3):
     nearest drop."""
     w = np.asarray(w)
     ks = [int(k) for k in np.argsort(-w, kind="stable")[:most] if w[k] >= floor]
+    if not ks:                                               # silence: no note stands out
+        return disc()
     cx = np.array([ring*np.sin(TAU*k/12) for k in ks]); cy = np.array([-ring*np.cos(TAU*k/12) for k in ks])
     rad = np.array([1.5 + 5*w[k]/15 for k in ks])
     def raw(x, y):
         dist = np.stack([np.hypot(x - a, y - b) - r for a, b, r in zip(cx, cy, rad)])
-        j = dist.argmin(0)
+        j = (dist <= dist.min(0) + TIE).argmax(0)            # nearest drop; exact ties go to the first
         return -np.log(np.exp(-beta*dist).sum(0))/beta, angle(x - cx[j], y - cy[j])
     h0 = raw(*tile_xy())[0].min()
     def f(x, y):
@@ -83,9 +87,10 @@ LANDSCAPES = {"disc": disc, "droplets": droplets}
 
 # ---------------------------------------------------------------- landscape -> layout, ripple, time map
 KEY_STEPS = 65536       # sort keys are compared as integers: 1/65536 of a contour
+TIE = 1e-9              # decisions closer than this are settled by a fixed rule, not by rounding
 
 def spiral_key(h, th):
-    return np.floor(h - th) + th
+    return np.floor(h - th + TIE) + th
 
 def layout_from(f):
     """cells[t] = grid cell of tile t (a permutation); also the sorted keys."""
