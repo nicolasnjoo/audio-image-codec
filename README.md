@@ -21,13 +21,15 @@ are what most measurements below use.
 a2i/        mdct.py  codec.py  shapes.py  container.py  channel.py  looks.py  features.py
             testsignals.py
 web/        a2i.js  worker.js  index.html   (the same codec in the browser, and the test page)
+docs/       the test page as a complete web page, built from web/ and served by GitHub Pages
 scripts/    check_baseline.py  levers.py  colour_test.py  render_options.py
             loss_budget.py  figures.py  real_music.py  container_test.py
-            web_check.py  web_node.js
+            web_check.py  web_node.js  build_site.py
             explore_aesthetics.py  explore_shapes.py
             explore_quality.py  explore_fine_layer.py   (experimental, not the format)
 tests/      test_mdct.py  test_roundtrip.py  test_determinism.py  test_colorize.py
             test_explore.py  test_shapes.py  test_rate.py  test_container.py  test_web.py
+            test_site.py
 out/        generated images, WAVs, JSON (git-ignored)
 ```
 
@@ -41,7 +43,7 @@ Pipeline, one function per stage:
 ```
 python -m venv .venv
 .venv/bin/pip install -r requirements.txt pytest
-.venv/bin/python -m pytest -q                  # 71 tests, ~50 s (three need Node.js)
+.venv/bin/python -m pytest -q                  # 73 tests, ~50 s (three need Node.js)
 
 .venv/bin/python scripts/check_baseline.py     # MDCT reconstruction + grey baseline
 .venv/bin/python scripts/levers.py             # layout / contrast / grain levers
@@ -208,6 +210,13 @@ Carrying the gains as analog values in reserved tiles was tried first and cost 2
 soon as the channel added noise, because a small gain error becomes a noise floor.
 
 ## Browser version and test page
+
+**Test page on GitHub Pages:** https://nicolasnjoo.github.io/audio-image-codec/ once Pages is
+switched on for this repository (Settings → Pages → Source "Deploy from a branch" → branch
+`claude/new-session-v6xt77`, folder `/docs`). It runs entirely in the browser: choose a sound
+file, make a picture, save it, then choose the picture or a screenshot of it to hear it back.
+`docs/` is generated; after changing anything in `web/`, run `python scripts/build_site.py`
+(a test fails when `docs/` is out of date).
 
 `web/a2i.js` is the same codec in JavaScript, with no dependencies; `web/worker.js` runs it
 off the main thread and `web/index.html` is the test page (page content for the published
